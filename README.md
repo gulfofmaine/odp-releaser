@@ -1,15 +1,14 @@
-# odp-releaser
+# ODP Releaser
 
 [![Actions Status][actions-badge]][actions-link]
-[![Documentation Status][rtd-badge]][rtd-link]
+[![Coverage][coverage-badge]][coverage-link]
+<!-- [![Documentation Status][rtd-badge]][rtd-link] -->
 
 [![PyPI version][pypi-version]][pypi-link]
-[![Conda-Forge][conda-badge]][conda-link]
 [![PyPI platforms][pypi-platforms]][pypi-link]
+<!-- [![Conda-Forge][conda-badge]][conda-link] -->
 
-[![GitHub Discussion][github-discussions-badge]][github-discussions-link]
-
-[![Coverage][coverage-badge]][coverage-link]
+<!-- [![GitHub Discussion][github-discussions-badge]][github-discussions-link] -->
 
 <!-- prettier-ignore-start -->
 [actions-badge]:            https://github.com/gulfofmaine/odp-releaser/actions/workflows/ci.yml/badge.svg
@@ -28,4 +27,20 @@
 
 <!-- prettier-ignore-end -->
 
-`odp-releaser` helps manage deploying Docker Images to private repos.
+ODP Releaser is a Python CLI tool and a set of Github Action workflows to help
+make deployment of Docker images to private repos more secure.
+
+It takes advantage of GitHub's
+[`repository_dispatch` event](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#repository_dispatch)
+to communicate images changes to the private repos and a tightly scoped GitHub
+app for permissions.
+
+In the source repos, a 'notify' workflow runs after images are built and pushed.
+It creates a `client_payload` that is included in the `repository_dispatch`
+event targeting any number of private repos with Kubernetes or other manifests.
+
+The private deployment repos have a workflow that is triggered on the
+`repository_dispatch` event. It looks up the image against a local config file
+to see what Kubernetes/Kustomize manifests or Helm values need to be updated for
+that image, and if there are additional permission gates (allowed
+users/teams/repos), and if the image should be copied to another registry.

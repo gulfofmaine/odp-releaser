@@ -1,0 +1,119 @@
+# Read more: https://zensical.org/docs/setup/basics
+
+[project]
+site_name = "odp-releaser"
+site_description = "Tooling to help manage releasing Docker images across repos"
+site_author = "Alex Kerney"
+copyright = "&copy; 2026 Alex Kerney"
+repo_url = "https://github.com/gulfofmaine/odp-releaser"
+docs_dir = "docs"
+nav = [
+    "index.md",
+    "workflows.md",
+    "cli.md",
+    { "API and Configuration" = [
+        "client_payload.md",
+        "image_manifest_config.md",
+        "dump_event.md"
+    ]}
+]
+
+# For Typer rendering
+extra_css = ["https://cdn.jsdelivr.net/gh/termynal/termynal.py@0.14.0/termynal/assets/termynal.css"]
+extra_javascript = ["https://cdn.jsdelivr.net/gh/termynal/termynal.py@0.14.0/termynal/assets/termynal.js"]
+
+[project.theme]
+language = "en"
+features = [
+    "announce.dismiss",
+    "content.action.edit",
+    "content.action.view",
+    "content.code.annotate",
+    "content.code.copy",
+    "content.code.select",
+    "content.footnote.tooltips",
+    "content.tabs.link",
+    "content.tooltips",
+    "navigation.footer",
+    "navigation.indexes",
+    "navigation.instant",
+    "navigation.instant.prefetch",
+    "navigation.path",
+    "navigation.sections",
+    "navigation.tabs",
+    "navigation.top",
+    "navigation.tracking",
+    "search.highlight",
+]
+icon.repo = "fontawesome/brands/github"
+
+# Palette toggle for automatic mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+# Palette toggle for light mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+# Palette toggle for dark mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/gulfofmaine/odp-releaser"
+
+# Markdown extensions
+# 
+[project.markdown_extensions.pymdownx.snippets]
+
+[project.markdown_extensions.pymdownx.superfences]
+[[project.markdown_extensions.pymdownx.superfences.custom_fences]]
+name = "python"
+class = "python"
+validator = "markdown_exec.validator"
+format = "markdown_exec.formatter"
+[[project.markdown_extensions.pymdownx.superfences.custom_fences]]
+name = "md"
+class = "markdown"
+validator = "markdown_exec.validator"
+format = "markdown_exec.formatter"
+
+[project.markdown_extensions."mkdocs_typer2.markdown:makeExtension"]
+pretty = false
+engine = "native"
+
+# ----------------------------------------------------------------------------
+# Plugins configuration
+# ----------------------------------------------------------------------------
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src", "examples"]
+inventories = ["https://docs.python.org/3/objects.inv"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+backlinks = "tree"
+docstring_options = { "ignore_init_summary" = true }
+docstring_section_style = "list"
+filters = "public"
+heading_level = 1
+inherited_members = true
+merge_init_into_class = true
+parameter_headings = true
+separate_signature = true
+show_root_heading = true
+show_root_full_path = false
+show_signature_annotations = true
+show_source = true
+show_symbol_type_heading = true
+show_symbol_type_toc = true
+signature_crossrefs = true
+summary = true
+unwrap_annotated = true
+preload_modules = ["goodconf"]
