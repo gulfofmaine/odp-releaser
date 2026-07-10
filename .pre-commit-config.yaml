@@ -61,6 +61,7 @@ repos:
         additional_dependencies:
           - nox
           - pytest
+          - githubkit
           - goodconf
           - inline-snapshot
           - pydantic
@@ -86,7 +87,9 @@ repos:
         name: Disallow improper capitalization
         language: pygrep
         entry: PyBind|Numpy|Cmake|CCache|Github|PyTest
-        exclude: .pre-commit-config.yaml
+        # tests/event_data and its inline snapshots contain verbatim captured
+        # GitHub event payloads whose text can't be edited
+        exclude: .pre-commit-config.yaml|tests/event_data/|tests/test_github_context.py
 
   - repo: https://github.com/abravalheri/validate-pyproject
     rev: "v0.25"

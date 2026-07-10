@@ -29,6 +29,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
+    "githubkit[auth-app]>=0.16.0",
     "goodconf>=7.1.0",
     "typer>=0.26.8",
     "yamlpath>=3.9.1",
@@ -49,6 +50,7 @@ test = [
   "inline-snapshot>=0.34.2",
   "pytest >=9",
   "pytest-cov >=7",
+  "respx>=0.23.1",
 ]
 dev = [
   { include-group = "test" },
