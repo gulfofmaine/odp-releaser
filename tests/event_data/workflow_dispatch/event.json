@@ -1,0 +1,25 @@
+{
+  "ref": "refs/heads/main",
+  "inputs": {
+    "image_tag": "v1.2.3",
+    "environment": "production"
+  },
+  "repository": {
+    "id": 123456789,
+    "name": "climatology_py_dash",
+    "full_name": "gulfofmaine/climatology_py_dash",
+    "owner": {
+      "login": "gulfofmaine",
+      "id": 32169459,
+      "type": "Organization"
+    },
+    "html_url": "https://github.com/gulfofmaine/climatology_py_dash",
+    "default_branch": "main"
+  },
+  "sender": {
+    "login": "abkfenris",
+    "id": 1296209,
+    "type": "User"
+  },
+  "workflow": ".github/workflows/dump_event.yml"
+}

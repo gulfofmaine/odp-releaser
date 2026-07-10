@@ -62,6 +62,7 @@ repos:
           - nox
           - pytest
           - goodconf
+          - inline-snapshot
           - pydantic
           - typer
           - rich
