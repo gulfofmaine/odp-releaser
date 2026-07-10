@@ -1,0 +1,21 @@
+{
+  "image_name": "buoy_retriever_s3_timeseries",
+  "digest": "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
+  "tag": "7c8d9e0",
+  "git_sha": "7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
+  "image_ref": "ghcr.io/ioos/buoy_retriever_s3_timeseries@sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
+  "repo": "ioos/buoy_retriever",
+  "source": {
+    "event": "push",
+    "ref": "main",
+    "url": "https://github.com/ioos/buoy_retriever/pull/142",
+    "run_url": "https://github.com/ioos/buoy_retriever/actions/runs/1200000002",
+    "actor": "abkfenris",
+    "release": null,
+    "pr": {
+      "number": 142,
+      "title": "Add hourly S3 timeseries ingest",
+      "url": "https://github.com/ioos/buoy_retriever/pull/142"
+    }
+  }
+}

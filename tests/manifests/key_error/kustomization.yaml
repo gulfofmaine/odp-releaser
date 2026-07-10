@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mariners-dashboard-dev
+
+labels:
+- includeSelectors: true
+  pairs:
+    app: mariners-dashboard-dev
+    funder: NERACOOS
+    maintainer: akerney
+    project: Mariners_dashboard
+
+resources:
+- github.com/gulfofmaine/Neracoos-1-Buoy-App/k8s?ref=5763586f994226eb2d95b4f8b431f011fcc21f76
+- image-pull-secret.yaml
+- mariners-dev-secrets.yaml
+
+images:
+- name: gmri/neracoos-mariners-dashboard
+  newName: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/neracoos-mariners-dashboard
+  newTag: "5763586"
+
+patches:
+- path: ingress_patch.yaml
+  target:
+    group: networking.k8s.io
+    kind: Ingress
+    name: mariners-dashboard
+    version: v1
+- path: frontend.patch.yaml

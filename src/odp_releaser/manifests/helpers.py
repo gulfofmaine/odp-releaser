@@ -1,0 +1,29 @@
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+
+from yamlpath.common import Parsers
+from yamlpath import Processor
+
+from odp_releaser.logger import logger
+from odp_releaser.yamlpath_logger import YamlPathLoggerAdapter
+
+yaml = Parsers.get_yaml_editor()
+yamlpath_logger = YamlPathLoggerAdapter(logger)
+
+
+def open_for_editing(manifest_text: str):
+    with NamedTemporaryFile(mode="w+", encoding="utf-8") as f:
+        f.write(manifest_text)
+        f.seek(0)
+        yaml_data, doc_loaded = Parsers.get_yaml_data(yaml, yamlpath_logger, f.name)
+
+    if not doc_loaded:
+        raise Exception("Unable to load manifest YAML")
+
+    return Processor(yamlpath_logger, yaml_data)
+
+
+def set_value(processor: Processor, path: str, value: str, mustexist: bool = True):
+    logger.warning(f"Nodes for path {path}: {list(processor.get_nodes(path))}")  
+    processor.set_value(path, value, mustexist=mustexist)
+    return f"Set value for path {path} to {value}"
