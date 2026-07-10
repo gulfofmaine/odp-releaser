@@ -7,7 +7,7 @@ icon: lucide/workflow
 This repo has workflows that can be used in other repos.
 
 - `notify` should be run in the code repo and triggered in a workflow after an image has been built and pushed to a public repository.
-- `bump_images` can be incorperated into a `repository_dispatch` workflow to apply the image to deployment manifests.
+- `bump_images` can be incorporated into a `repository_dispatch` workflow to apply the image to deployment manifests.
 
 Both will be called with the [cross-repo `uses:` syntax](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#calling-a-reusable-workflow).
 
@@ -15,7 +15,7 @@ Both will be called with the [cross-repo `uses:` syntax](https://docs.github.com
 
 Configure the `if:` to constrain to the correct events/repo/branch.
 
-`secrets: inherit` needs to be set so that it can use the Github token.
+`secrets: inherit` needs to be set so that it can use the GitHub token.
 
 ### `with:` Inputs:
 
@@ -33,7 +33,7 @@ Configure the `if:` to constrain to the correct events/repo/branch.
     notify:
         needs: [shortsha, build_test_push]
         if: ${{ github.repository == 'ioos/buoy_retriever' && github.event_name != 'pull_request' }}
-        uses: gulfofmaine/odp-dispatch/.github/workflows/_notify.yml@<sha-or-tag>
+        uses: gulfofmaine/odp-releaser/.github/workflows/notify.yml@<sha-or-tag>
         permissions:
             contents: read
             pull-requests: read
@@ -45,4 +45,3 @@ Configure the `if:` to constrain to the correct events/repo/branch.
 ```
 
 ## Bump Images
-

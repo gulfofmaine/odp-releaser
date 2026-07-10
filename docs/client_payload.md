@@ -11,19 +11,19 @@ The client payload is what is sent along with the `repository_dispatch` event by
 ### Push
 
 ```json
---8<-- "tests/event_data/client_payload/push.json"
+--8<-- "src/odp_releaser/client_payload/push.json"
 ```
 
 ### Release
 
 ```json
---8<-- "tests/event_data/client_payload/release.json"
+--8<-- "src/odp_releaser/client_payload/release.json"
 ```
 
 ### Workflow Dispatch
 
 ```json
---8<-- "tests/event_data/client_payload/workflow_dispatch.json"
+--8<-- "src/odp_releaser/client_payload/workflow_dispatch.json"
 ```
 
 ## Client Payload Model
