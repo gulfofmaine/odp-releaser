@@ -1,17 +1,25 @@
 from pathlib import Path
 from typing import Annotated
 
-from goodconf import GoodConf, Field
-from pydantic import BaseModel, model_validator
+from goodconf import Field, GoodConf
+from pydantic import model_validator
 
 
 class KustomizeManifest(GoodConf):
     path: Annotated[Path, Field(initial=lambda: "apps/mariners/kustomization.yaml")]
-    set: Annotated[dict[str, str], Field(initial=lambda: {"/resources[.^github.com/gulfofmaine/Neracoos-1-Buoy-App/k8s?ref=]": "github.com/gulfofmaine/Neracoos-1-Buoy-App/k8s?ref={new_tag}"}, default_factory=dict)]
+    set: Annotated[
+        dict[str, str],
+        Field(
+            initial=lambda: {
+                "/resources[.^github.com/gulfofmaine/Neracoos-1-Buoy-App/k8s?ref=]": "github.com/gulfofmaine/Neracoos-1-Buoy-App/k8s?ref={new_tag}"
+            },
+            default_factory=dict,
+        ),
+    ]
 
     @model_validator(mode="before")
     @classmethod
-    def coerce_path_string(cls, value):
+    def coerce_path_string(cls, value: object) -> object:
         if isinstance(value, (str, Path)):
             return {"path": value}
         return value
@@ -24,7 +32,7 @@ class HelmManifest(GoodConf):
 
     @model_validator(mode="before")
     @classmethod
-    def coerce_path_string(cls, value):
+    def coerce_path_string(cls, value: object) -> object:
         if isinstance(value, (str, Path)):
             return {"path": value}
         return value
@@ -35,7 +43,7 @@ class ImageConfig(GoodConf):
         list[str] | None,
         Field(
             ...,
-            description="List of Github events for these manifests",
+            description="List of GitHub events for these manifests",
             initial=lambda: ["push", "publish"],
         ),
     ] = None
@@ -50,7 +58,7 @@ class ImageConfig(GoodConf):
         Field(
             description="List of Kustomize manifests to set for the image",
             initial=lambda: ["apps/mariners/kustomization.yaml"],
-            default_factory=list
+            default_factory=list,
         ),
     ]
     helm_values: Annotated[
@@ -58,7 +66,7 @@ class ImageConfig(GoodConf):
         Field(
             description="List of Helm values files for Dagster user code",
             initial=lambda: ["apps/sea-eagle/values.yaml"],
-            default_factory=list
+            default_factory=list,
         ),
     ]
     # allowed_users: Annotated[
@@ -73,7 +81,7 @@ class ImageConfig(GoodConf):
     #     list[str] | None,
     #     Field(
     #         ...,
-    #         description="Allowed Github teams",
+    #         description="Allowed GitHub teams",
     #         initial=lambda: ["gulfofmaine/odp", "ioos/team2"],
     #     ),
     # ] = None
@@ -104,7 +112,3 @@ class ManifestConfig(GoodConf):
         ),
     ]
     """Mapping of image names to manifests to update"""
-
-
-if __name__ == "__main__":
-    print(ManifestConfig.generate_yaml())

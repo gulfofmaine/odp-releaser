@@ -25,9 +25,7 @@ def test_debug_with_prefix_does_not_raise_and_includes_prefix(
 
     adapter.debug("something happened", prefix="Processor::get_nodes: ")
 
-    assert any(
-        "Processor::get_nodes: " in record.message for record in caplog.records
-    )
+    assert any("Processor::get_nodes: " in record.message for record in caplog.records)
     assert any("something happened" in record.message for record in caplog.records)
 
 
@@ -39,7 +37,10 @@ def test_debug_with_data_does_not_raise_and_includes_data(
 
     adapter.debug("dumping data", data={"key": "value"})
 
-    assert any("key" in record.message and "value" in record.message for record in caplog.records)
+    assert any(
+        "key" in record.message and "value" in record.message
+        for record in caplog.records
+    )
 
 
 def test_critical_always_raises_system_exit_with_given_code(

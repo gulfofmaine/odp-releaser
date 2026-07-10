@@ -71,7 +71,7 @@ icon = "fontawesome/brands/github"
 link = "https://github.com/gulfofmaine/odp-releaser"
 
 # Markdown extensions
-# 
+#
 [project.markdown_extensions.pymdownx.snippets]
 
 [project.markdown_extensions.pymdownx.superfences]

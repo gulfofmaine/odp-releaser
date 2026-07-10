@@ -27,7 +27,7 @@
 
 <!-- prettier-ignore-end -->
 
-ODP Releaser is a Python CLI tool and a set of Github Action workflows to help
+ODP Releaser is a Python CLI tool and a set of GitHub Action workflows to help
 make deployment of Docker images to private repos more secure.
 
 It takes advantage of GitHub's

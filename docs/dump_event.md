@@ -2,7 +2,7 @@
 icon: lucide/chart-no-axes-gantt
 ---
 
-# Dump Github Events
+# Dump GitHub Events
 
 ```yml
 name: "Dump GitHub Event"
@@ -22,7 +22,7 @@ concurrency:
 jobs:
   dump_event:
     runs-on: ubuntu-24.04
-    name: Dump Github event info for debugging
+    name: Dump GitHub event info for debugging
     permissions:
       contents: read
     steps:

@@ -19,10 +19,18 @@ class ClientPayloadSource(BaseModel):
     event: Annotated[str, Field(..., description="Event name")]
     ref: Annotated[str, Field(..., description="Branch or tag name")]
     url: Annotated[HttpUrl, Field(..., description="Best link back to the source")]
-    run_url: Annotated[HttpUrl, Field(..., description="URL to the run associated with the source")]
+    run_url: Annotated[
+        HttpUrl, Field(..., description="URL to the run associated with the source")
+    ]
     actor: Annotated[str, Field(..., description="User who triggered the event")]
-    release: Annotated[Release | None, Field(description="Release information associated with the source")] = None
-    pr: Annotated[PullRequest | None, Field(description="Pull request information associated with the source")] = None
+    release: Annotated[
+        Release | None,
+        Field(description="Release information associated with the source"),
+    ] = None
+    pr: Annotated[
+        PullRequest | None,
+        Field(description="Pull request information associated with the source"),
+    ] = None
 
 
 class ClientPayload(BaseModel):
@@ -31,10 +39,12 @@ class ClientPayload(BaseModel):
     tag: str = Field(..., description="Tag of the image")
     git_sha: str = Field(..., description="Git SHA of the commit")
     image_ref: str = Field(..., description="Full reference of the image")
-    source: ClientPayloadSource = Field(..., description="Source information of the payload")
+    source: ClientPayloadSource = Field(
+        ..., description="Source information of the payload"
+    )
     repo: str = Field(..., description="Repository")
 
-    def new_tag(self):
+    def new_tag(self) -> str:
         if self.source.event == "release":
             return self.source.ref
         return self.tag

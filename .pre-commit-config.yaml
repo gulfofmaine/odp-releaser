@@ -41,6 +41,9 @@ repos:
       - id: prettier
         types_or: [yaml, markdown, html, css, scss, javascript, json]
         args: [--prose-wrap=always]
+        # mkdocstrings/mkdocs-typer2 `:::` directives rely on indented
+        # continuation lines that prettier folds into a single paragraph
+        exclude: ^docs/.*\.md$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.15.20"
@@ -58,6 +61,11 @@ repos:
         additional_dependencies:
           - nox
           - pytest
+          - goodconf
+          - pydantic
+          - typer
+          - rich
+          - ruamel.yaml
 
   - repo: https://github.com/codespell-project/codespell
     rev: "v2.4.2"

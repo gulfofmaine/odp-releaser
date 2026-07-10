@@ -95,6 +95,10 @@ module = "odp_releaser.*"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
+[[tool.mypy.overrides]]
+module = ["yamlpath.*"]
+ignore_missing_imports = true
+
 
 [tool.ruff]
 show-fixes = true

@@ -12,7 +12,10 @@ def test_missmatched_sha_format_error():
 
     with pytest.raises(KeyError):
         bump_images(
-            config_path=Path(__file__).parent / "manifests" / "key_error" / "image_manifest.yaml",
+            config_path=Path(__file__).parent
+            / "manifests"
+            / "key_error"
+            / "image_manifest.yaml",
             client_payload=client_payload.model_dump_json(),
             dry_run=True,
         )

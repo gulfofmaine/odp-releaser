@@ -1,23 +1,21 @@
-from typing import Annotated
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
+from odp_releaser.bump_images import bump_images
 from odp_releaser.logger import logger
 from odp_releaser.schemas.client_payload import ClientPayload
-from odp_releaser.schemas.manifest_config import ManifestConfig
-from odp_releaser.bump_images import bump_images
-
 
 CLIENT_PAYLOAD_DIR = Path(__file__).parent / "client_payload"
 
 
 def bump_images_tester(
-        ctx: typer.Context,
-        config_path: Annotated[Path, typer.Argument(envvar="MANIFEST_CONFIG_PATH")],
-        image_name: Annotated[str, typer.Argument()],
-        event_type: Annotated[str, typer.Argument()],
-    ): 
+    ctx: typer.Context,
+    config_path: Annotated[Path, typer.Argument(envvar="MANIFEST_CONFIG_PATH")],
+    image_name: Annotated[str, typer.Argument()],
+    event_type: Annotated[str, typer.Argument()],
+) -> None:
     """Test bumping images with the given configuration, image name, and event type."""
     logger.debug(f"Context: {ctx.obj}")
     logger.debug(f"Config path: {config_path}")
@@ -35,7 +33,8 @@ def bump_images_tester(
         dry_run=True,
     )
 
-def set_payload_image(image_name, payload):
+
+def set_payload_image(image_name: str, payload: ClientPayload) -> None:
     payload.image_name = image_name
 
     _, image_ref_digest = payload.image_ref.split("@")
@@ -45,7 +44,8 @@ def set_payload_image(image_name, payload):
     logger.debug("Replaced client payload:")
     logger.debug(payload)
 
-def load_client_payload(event_type):
+
+def load_client_payload(event_type: str) -> ClientPayload:
     payload_path = CLIENT_PAYLOAD_DIR / f"{event_type}.json"
 
     logger.debug(f"Payload path: {payload_path}")
