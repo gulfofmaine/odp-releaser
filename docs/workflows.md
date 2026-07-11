@@ -139,8 +139,10 @@ Each entry:
 | `repo` | yes | — | Name of the deploy repository. |
 | `event_type` | no | `image-published` | `repository_dispatch` event type to send. |
 
-A missing file, an empty file, or an empty array is a no-op: `notify` logs
-that there's nothing to dispatch and exits successfully.
+A missing file is an error: `notify` exits non-zero and suggests generating
+one with `odp-releaser generate-config deploy-targets`. An existing file that
+is empty or contains an empty array is a valid no-op — `notify` logs that
+there's nothing to dispatch and exits successfully.
 
 ## Bump images
 

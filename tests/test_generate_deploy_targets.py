@@ -18,7 +18,7 @@ def test_example_yaml_handles_top_level_list_of_models() -> None:
 
     # The DeployTarget docstring is the top-of-file comment.
     assert text.startswith(
-        "# A repository that should receive a ``repository_dispatch`` event."
+        "# A repository that should send ``repository_dispatch`` event."
     )
     # Field descriptions are attached to the first item only.
     assert text.count("# Owner of the deploy repository") == 1

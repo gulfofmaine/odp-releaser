@@ -13,10 +13,7 @@ class DispatchAppCredentials(BaseModel):
 
 
 class DeployTarget(BaseModel):
-    """A repository that should receive a ``repository_dispatch`` event.
-
-    Parsed from ``.github/deploy_targets.yaml`` by the ``notify`` command.
-    """
+    """A repository that should send ``repository_dispatch`` event."""
 
     owner: Annotated[str, Field(..., description="Owner of the deploy repository")]
     repo: Annotated[str, Field(..., description="Name of the deploy repository")]

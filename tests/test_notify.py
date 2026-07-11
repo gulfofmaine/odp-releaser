@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -15,6 +16,8 @@ from odp_releaser.make_payload import build_payload
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 API = "https://api.github.com"
 
@@ -100,7 +103,7 @@ def _mock_target(
 # --- no targets --------------------------------------------------------------
 
 
-def test_notify_no_targets_file(tmp_path: Path) -> None:
+def test_notify_missing_targets_file_exits_nonzero(tmp_path: Path) -> None:
     summary = tmp_path / "summary"
     missing = tmp_path / "does-not-exist.yaml"
 
@@ -111,14 +114,32 @@ def test_notify_no_targets_file(tmp_path: Path) -> None:
         env=_env(tmp_path, targets_path=missing, summary_path=summary),
     )
 
-    assert result.exit_code == 0, result.output
-    assert "No deploy targets configured" in summary.read_text()
+    assert result.exit_code != 0
+    output = result.output or result.stderr
+    assert "No deploy targets file" in output
+    assert "generate-config deploy-targets" in output
 
 
 def test_notify_empty_targets_array(tmp_path: Path) -> None:
     summary = tmp_path / "summary"
     targets = tmp_path / "deploy_targets.yaml"
     targets.write_text("[]")
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["notify", IMAGE, TAG, DIGEST],
+        env=_env(tmp_path, targets_path=targets, summary_path=summary),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No deploy targets configured" in summary.read_text()
+
+
+def test_notify_empty_file_exits_zero(tmp_path: Path) -> None:
+    summary = tmp_path / "summary"
+    targets = tmp_path / "deploy_targets.yaml"
+    targets.write_text("")
 
     runner = typer.testing.CliRunner()
     result = runner.invoke(
@@ -322,3 +343,178 @@ def test_notify_schema_mismatch_exits_nonzero(tmp_path: Path) -> None:
     assert result.exception is None or isinstance(
         result.exception, (typer.Exit, SystemExit)
     )
+
+
+# --- test-notify --------------------------------------------------------------
+
+
+def test_test_notify_reports_credentials_available(
+    tmp_path: Path, rsa_private_key: str
+) -> None:
+    targets = tmp_path / "deploy_targets.yaml"
+    _write_targets(
+        targets,
+        [{"owner": "acme", "repo": "widgets", "event_type": "image-published"}],
+    )
+
+    env = {
+        "DISPATCH_APPS": _dispatch_apps(rsa_private_key, ["acme"]),
+    }
+
+    with respx.mock(base_url=API) as router:
+        runner = typer.testing.CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "test",
+                "notify",
+                "--targets-path",
+                str(targets),
+                "--image-name",
+                "climatology_py_dash",
+                "--event-type",
+                "push",
+            ],
+            env=env,
+        )
+        assert router.calls.call_count == 0
+
+    assert result.exit_code == 0, result.output
+    assert "credentials available" in result.output
+    assert "acme/widgets" in result.output
+
+
+def test_test_notify_reports_missing_credentials_and_exits_zero(
+    tmp_path: Path,
+) -> None:
+    targets = tmp_path / "deploy_targets.yaml"
+    _write_targets(
+        targets,
+        [{"owner": "acme", "repo": "widgets", "event_type": "image-published"}],
+    )
+
+    with respx.mock(base_url=API) as router:
+        runner = typer.testing.CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "test",
+                "notify",
+                "--targets-path",
+                str(targets),
+                "--image-name",
+                "climatology_py_dash",
+                "--event-type",
+                "push",
+            ],
+            env={},
+        )
+        assert router.calls.call_count == 0
+
+    assert result.exit_code == 0, result.output
+    assert "no credentials" in result.output
+    assert "acme/widgets" in result.output
+
+
+def test_test_notify_missing_targets_file_exits_nonzero(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist.yaml"
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "test",
+            "notify",
+            "--targets-path",
+            str(missing),
+            "--image-name",
+            "climatology_py_dash",
+            "--event-type",
+            "push",
+        ],
+        env={},
+    )
+
+    assert result.exit_code != 0
+    output = result.output or result.stderr
+    assert "No deploy targets file" in output
+
+
+def test_test_notify_empty_targets_file_exits_zero(tmp_path: Path) -> None:
+    targets = tmp_path / "deploy_targets.yaml"
+    targets.write_text("[]")
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "test",
+            "notify",
+            "--targets-path",
+            str(targets),
+            "--image-name",
+            "climatology_py_dash",
+            "--event-type",
+            "push",
+        ],
+        env={},
+    )
+
+    assert result.exit_code == 0, result.output
+
+
+def test_test_notify_defaults_to_info_logging(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    targets = tmp_path / "deploy_targets.yaml"
+    _write_targets(
+        targets,
+        [{"owner": "acme", "repo": "widgets", "event_type": "image-published"}],
+    )
+
+    caplog.set_level(logging.DEBUG)
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "test",
+            "notify",
+            "--targets-path",
+            str(targets),
+            "--image-name",
+            "climatology_py_dash",
+            "--event-type",
+            "push",
+        ],
+        env={},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert any(
+        record.levelno == logging.INFO and "Client payload" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_test_notify_malformed_targets_file_exits_nonzero(tmp_path: Path) -> None:
+    targets = tmp_path / "deploy_targets.yaml"
+    targets.write_text("{ not valid yaml")
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "test",
+            "notify",
+            "--targets-path",
+            str(targets),
+            "--image-name",
+            "climatology_py_dash",
+            "--event-type",
+            "push",
+        ],
+        env={},
+    )
+
+    assert result.exit_code != 0

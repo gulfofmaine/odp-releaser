@@ -5,9 +5,15 @@ from pathlib import Path
 
 import pytest
 import typer
+import typer.testing
 
-from odp_releaser.bump_image_tester import load_client_payload, set_payload_image
+from odp_releaser.bump_image_tester import (
+    EventType,
+    load_client_payload,
+    set_payload_image,
+)
 from odp_releaser.bump_images import bump_images
+from odp_releaser.main import app
 
 MANIFESTS_DIR = Path(__file__).parent / "manifests"
 
@@ -30,7 +36,7 @@ def _parse_github_output(text: str) -> dict[str, str]:
 
 
 def test_missmatched_sha_format_error():
-    client_payload = load_client_payload("push")
+    client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
 
     with pytest.raises(KeyError):
@@ -50,7 +56,7 @@ def test_success_path_writes_github_output(
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
 
-    client_payload = load_client_payload("push")
+    client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
 
     bump_images(
@@ -87,7 +93,7 @@ def test_dagster_helm_and_kustomize_dry_run(
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
 
-    client_payload = load_client_payload("push")
+    client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/sea-eagle-brown-3crs", client_payload)
 
     bump_images(
@@ -121,7 +127,7 @@ def test_no_config_for_image_reports_unchanged(
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
 
-    client_payload = load_client_payload("push")
+    client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/some-unconfigured-image", client_payload)
 
     bump_images(
@@ -139,7 +145,7 @@ def test_allowed_source_repos_rejects_disallowed_repo(tmp_path: Path) -> None:
     config_path = tmp_path / "image_manifest.yaml"
     config_path.write_text("allowed_source_repos:\n  - someorg/somerepo\nimages: {}\n")
 
-    client_payload = load_client_payload("push")
+    client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
 
     with pytest.raises(typer.Exit):
@@ -161,7 +167,7 @@ def test_allowed_source_repos_allows_listed_repo(
         "allowed_source_repos:\n  - ioos/buoy_retriever\nimages: {}\n"
     )
 
-    client_payload = load_client_payload("push")
+    client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
 
     bump_images(
@@ -192,7 +198,7 @@ def test_mixed_update_mode_warns_and_prefers_pull_request(
         "      update_mode: pull_request\n"
     )
 
-    client_payload = load_client_payload("push")
+    client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
 
     with caplog.at_level(logging.WARNING, logger="odp-releaser"):
@@ -206,3 +212,63 @@ def test_mixed_update_mode_warns_and_prefers_pull_request(
     outputs = _parse_github_output(output.read_text())
     assert outputs["update_mode"] == "pull_request"
     assert outputs["changed"] == "false"
+
+
+def test_test_bump_images_command_with_flags(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "test",
+            "bump-images",
+            "--config-path",
+            str(MANIFESTS_DIR / "push" / "image_manifest.yaml"),
+            "--image-name",
+            "gmri/neracoos-mariners-dashboard",
+            "--event-type",
+            "push",
+        ],
+        env={"GITHUB_OUTPUT": str(output)},
+    )
+
+    assert result.exit_code == 0, result.output
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "true"
+
+
+def test_test_bump_images_rejects_invalid_event_type_flag() -> None:
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "test",
+            "bump-images",
+            "--config-path",
+            str(MANIFESTS_DIR / "push" / "image_manifest.yaml"),
+            "--image-name",
+            "gmri/neracoos-mariners-dashboard",
+            "--event-type",
+            "not-a-real-event",
+        ],
+    )
+
+    assert result.exit_code != 0
+
+
+def test_test_bump_images_prompts_for_missing_values(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    config_path = MANIFESTS_DIR / "push" / "image_manifest.yaml"
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["test", "bump-images"],
+        input=f"{config_path}\ngmri/neracoos-mariners-dashboard\npush\n",
+        env={"GITHUB_OUTPUT": str(output)},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "configured images" in result.output
+    assert "gmri/neracoos-mariners-dashboard" in result.output
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "true"

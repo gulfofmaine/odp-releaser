@@ -27,6 +27,13 @@ from githubkit.exception import RequestFailed
 from pydantic import TypeAdapter, ValidationError
 from ruamel.yaml.error import YAMLError
 
+from odp_releaser.bump_image_tester import (
+    EventType,
+    load_client_payload,
+    prompt_event_type,
+    prompt_image_name,
+    set_payload_image,
+)
 from odp_releaser.cli_options import (
     GitHubActor,
     GitHubEventName,
@@ -80,6 +87,17 @@ class InvalidDeployTargetsError(Exception):
         )
 
 
+class MissingDeployTargetsError(Exception):
+    """The deploy targets file does not exist."""
+
+    def __init__(self, targets_path: Path) -> None:
+        self.targets_path = targets_path
+        super().__init__(
+            f"No deploy targets file at {targets_path}. Generate one with "
+            "`odp-releaser generate-config deploy-targets`."
+        )
+
+
 @dataclass
 class TargetResult:
     """The outcome of attempting to dispatch to a single deploy target."""
@@ -93,12 +111,13 @@ def load_targets(targets_path: Path) -> list[DeployTarget]:
     """Load and validate deploy targets from ``targets_path``.
 
     The file is parsed as YAML — a superset of JSON, so JSON files also load.
-    Returns an empty list when the file is missing, empty, or an empty array.
+    Raises :class:`MissingDeployTargetsError` when the file does not exist.
+    Returns an empty list when the file exists but is empty or an empty array.
     Raises :class:`InvalidDeployTargetsError` when the content is not valid
     YAML or does not match the :class:`DeployTarget` schema.
     """
     if not targets_path.exists():
-        return []
+        raise MissingDeployTargetsError(targets_path)
 
     content = targets_path.read_text().strip()
     if not content:
@@ -184,7 +203,7 @@ def notify(
 
     try:
         targets = load_targets(targets_path)
-    except InvalidDeployTargetsError as exc:
+    except (MissingDeployTargetsError, InvalidDeployTargetsError) as exc:
         logger.error("%s", exc)
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
@@ -225,3 +244,86 @@ def notify(
 
     if any(not result.ok for result in results):
         raise typer.Exit(1)
+
+
+def test_notify(
+    targets_path: TargetsPath = Path(DEFAULT_TARGETS_PATH),
+    image_name: Annotated[
+        str | None,
+        typer.Option(
+            "--image-name",
+            help=(
+                "Name of the image to substitute into the canned client "
+                "payload. Prompted interactively when omitted."
+            ),
+        ),
+    ] = None,
+    event_type: Annotated[
+        EventType | None,
+        typer.Option(
+            "--event-type",
+            help=(
+                "Canned client_payload event to load: push, release, or "
+                "workflow_dispatch. Prompted interactively when omitted."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Validate deploy targets and dispatch-credential availability.
+
+    Builds a canned `client_payload` for the chosen event type (the same
+    payloads `test bump-images` uses), reads the deploy targets, and reports,
+    per target, whether dispatch app credentials are available. No tokens are
+    minted and no network calls are made; this only checks whether
+    `DISPATCH_APP_ID`/`DISPATCH_APP_PRIVATE_KEY` or `DISPATCH_APPS` cover
+    every configured target owner.
+
+    Missing credentials for a target are reported, not treated as a failure:
+    the command exits non-zero only when `targets_path` does not exist or
+    fails to parse as a valid deploy-targets file.
+    """
+    if image_name is None:
+        image_name = prompt_image_name()
+    if event_type is None:
+        event_type = prompt_event_type()
+
+    payload = load_client_payload(event_type)
+    set_payload_image(image_name, payload)
+    logger.info("Client payload: %s", payload.model_dump_json())
+
+    try:
+        targets = load_targets(targets_path)
+    except (MissingDeployTargetsError, InvalidDeployTargetsError) as exc:
+        logger.error("%s", exc)
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+    if not targets:
+        message = f"No deploy targets configured in {targets_path}; nothing to test."
+        logger.info(message)
+        write_step_summary(message)
+        return
+
+    results: list[TargetResult] = []
+    for target in targets:
+        try:
+            resolve_app_credentials(target.owner)
+        except MissingCredentialsError:
+            results.append(
+                TargetResult(
+                    target,
+                    ok=False,
+                    detail=(
+                        "no credentials (set DISPATCH_APP_ID/"
+                        "DISPATCH_APP_PRIVATE_KEY or DISPATCH_APPS)"
+                    ),
+                )
+            )
+        else:
+            results.append(
+                TargetResult(target, ok=True, detail="credentials available")
+            )
+
+    table = _summary_table(results)
+    typer.echo(table)
+    write_step_summary(table)

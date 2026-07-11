@@ -10,12 +10,12 @@ from typer._completion_shared import Shells
 if TYPE_CHECKING:
     from typer import _click
 
-from odp_releaser.bump_image_tester import bump_images_tester
+from odp_releaser.bump_image_tester import test_bump_images
 from odp_releaser.bump_images import bump_images
 from odp_releaser.generate_config import app as generate_app
 from odp_releaser.logger import logger
 from odp_releaser.make_payload import make_payload
-from odp_releaser.notify import notify
+from odp_releaser.notify import notify, test_notify
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -49,8 +49,24 @@ def install(ctx: typer.Context, shell: Shells) -> None:
 app.add_typer(generate_app, name="generate-config")
 app.command()(notify)
 app.command()(bump_images)
-app.command()(bump_images_tester)
 app.command()(make_payload)
+
+app_test = typer.Typer(
+    no_args_is_help=True,
+    name="test",
+)
+app_test.command(name="notify")(test_notify)
+app_test.command(name="bump-images")(test_bump_images)
+app.add_typer(app_test, name="test")
+
+
+@app_test.callback()
+def test_main() -> None:
+    """Validate configs by mock running `notify` or `bump-images`."""
+    # These are interactive validation commands, so default to INFO
+    # verbosity; explicit -v/-vv/-vvv on the main app still wins.
+    if logger.getEffectiveLevel() > logging.INFO:
+        logger.setLevel(logging.INFO)
 
 
 def _version_callback(value: bool) -> None:

@@ -159,7 +159,12 @@ ignore = [
 # inspect.signature(eval_str=True)), so they must stay imported at module
 # scope and cannot move into a type-checking block.
 "src/odp_releaser/make_payload.py" = ["TC001"]
-"src/odp_releaser/notify.py" = ["TC001"]
+# PT028 assumes any ``test_*`` function is a pytest test; these CLI commands
+# are named ``test_notify``/``test_bump_images`` for the ``test notify``/
+# ``test bump-images`` subcommands, not pytest tests, so their Typer options
+# legitimately have defaults.
+"src/odp_releaser/notify.py" = ["TC001", "PT028"]
+"src/odp_releaser/bump_image_tester.py" = ["PT028"]
 
 
 [tool.pylint]

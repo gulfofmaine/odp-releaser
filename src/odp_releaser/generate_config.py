@@ -21,6 +21,10 @@ def image_manifest() -> None:
 @app.command()
 def deploy_targets() -> None:
     """Generate a `deploy_targets.yaml` configuration for a source repo to call with `odp-releaser notify`."""
+    typer.secho(
+        "# Default config path ``.github/deploy_targets.yaml`` in source repos to be"
+    )
+    typer.secho("# parsed by the ``notify`` command.\n")
     typer.secho(example_yaml(EXAMPLE_TARGETS))
 
 

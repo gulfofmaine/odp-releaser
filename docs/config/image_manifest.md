@@ -4,7 +4,9 @@ icon: lucide/pencil
 
 # Image manifest
 
-The image manifest is usually stored at `.github/image_manifest.yaml`.
+The image manifest is usually stored at `.github/image_manifest.yaml` in the deployment repos.
+
+It can be tested with `odp-releaser test bump-images`.
 
 ## Example image manifest
 
