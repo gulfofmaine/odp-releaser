@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [options]
-exclude-newer = "2026-07-03T21:05:55.529421Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P1W"
 
 [[package]]
@@ -342,19 +342,6 @@ wheels = [
 ]
 
 [[package]]
-name = "goodconf"
-version = "7.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/36/4c/44d167ec9de9b5d256ebb3ef0a3a5d4b69e366cc96835bdc5de006545019/goodconf-7.1.0.tar.gz", hash = "sha256:b000fdd93e931257648523bc2c15a32406c54223936b2fccca767cb9a94b13f9", size = 67400, upload-time = "2026-06-17T17:07:50.618Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/c9/7a4ad029d73f70293ed369b367bd91337d6f898e0c3a88c9607838afeb4a/goodconf-7.1.0-py3-none-any.whl", hash = "sha256:cf622f9501ef90f90de231e8804a1436123fb2098cd4bc5805aab8c038fca9ea", size = 11683, upload-time = "2026-06-17T17:07:49.546Z" },
-]
-
-[[package]]
 name = "griffe-pydantic"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -501,6 +488,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/96/73/1f20927d075c83c0e2bc814d3b8f9bd254d919069f78c5423224b4407944/markdown_exec-1.12.1.tar.gz", hash = "sha256:eee8ba0df99a5400092eeda80212ba3968f3cbbf3a33f86f1cd25161538e6534", size = 78105, upload-time = "2025-11-11T19:25:05.44Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ea/22/7b684ddb01b423b79eaba9726954bbe559540d510abc7a72a84d8eee1b26/markdown_exec-1.12.1-py3-none-any.whl", hash = "sha256:a645dce411fee297f5b4a4169c245ec51e20061d5b71e225bef006e87f3e465f", size = 38046, upload-time = "2025-11-11T19:25:03.878Z" },
+]
+
+[package.optional-dependencies]
+ansi = [
+    { name = "pygments-ansi-color" },
 ]
 
 [[package]]
@@ -761,21 +753,25 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "githubkit", extra = ["auth-app"] },
-    { name = "goodconf" },
     { name = "typer" },
     { name = "yamlpath" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "griffe-pydantic" },
     { name = "inline-snapshot" },
+    { name = "markdown-exec", extra = ["ansi"] },
+    { name = "mkdocs-typer2", extra = ["zensical"] },
+    { name = "mkdocstrings", extra = ["python"] },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "respx" },
+    { name = "zensical" },
 ]
 docs = [
     { name = "griffe-pydantic" },
-    { name = "markdown-exec" },
+    { name = "markdown-exec", extra = ["ansi"] },
     { name = "mkdocs-typer2", extra = ["zensical"] },
     { name = "mkdocstrings", extra = ["python"] },
     { name = "zensical" },
@@ -790,21 +786,25 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "githubkit", extras = ["auth-app"], specifier = ">=0.16.0" },
-    { name = "goodconf", specifier = ">=7.1.0" },
     { name = "typer", specifier = ">=0.26.8" },
     { name = "yamlpath", specifier = ">=3.9.1" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "griffe-pydantic", specifier = ">=1.3.1" },
     { name = "inline-snapshot", specifier = ">=0.34.2" },
+    { name = "markdown-exec", extras = ["ansi"], specifier = ">=1.12.1" },
+    { name = "mkdocs-typer2", extras = ["zensical"], specifier = ">=0.4.1" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.4" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-cov", specifier = ">=7" },
     { name = "respx", specifier = ">=0.23.1" },
+    { name = "zensical", specifier = ">=0.0.20" },
 ]
 docs = [
     { name = "griffe-pydantic", specifier = ">=1.3.1" },
-    { name = "markdown-exec", specifier = ">=1.12.1" },
+    { name = "markdown-exec", extras = ["ansi"], specifier = ">=1.12.1" },
     { name = "mkdocs-typer2", extras = ["zensical"], specifier = ">=0.4.1" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.4" },
     { name = "zensical", specifier = ">=0.0.20" },
@@ -952,26 +952,24 @@ wheels = [
 ]
 
 [[package]]
-name = "pydantic-settings"
-version = "2.14.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "typing-inspection" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5c/b5/8f48e906c3e0205276e8bd8cb7512217a87b2685304d64be27cad5b3019f/pydantic_settings-2.14.2.tar.gz", hash = "sha256:c19dd64b19097f1de80184f0cc7b0272a13ae6e170cbf240a3e27e381ed14a5f", size = 237700, upload-time = "2026-06-19T13:44:56.324Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/c1/6e422f34e569cf8e18df68d1939c81c099d2b61e4f7d9621c8a77560799c/pydantic_settings-2.14.2-py3-none-any.whl", hash = "sha256:a20c97b37910b6550d5ea50fbcc2d4187defe58cd57070b73863d069419c9440", size = 61715, upload-time = "2026-06-19T13:44:55.02Z" },
-]
-
-[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991, upload-time = "2026-03-29T13:29:33.898Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
+]
+
+[[package]]
+name = "pygments-ansi-color"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pygments" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/50/f9/7f417aaee98a74b4f757f2b72971245181fcf25d824d2e7a190345669eaf/pygments-ansi-color-0.3.0.tar.gz", hash = "sha256:7018954cf5b11d1e734383a1bafab5af613213f246109417fee3f76da26d5431", size = 7317, upload-time = "2023-05-18T22:44:35.792Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e6/17/8306a0bcd8c88d7761c2e73e831b0be026cd6873ce1f12beb3b4c9a03ffa/pygments_ansi_color-0.3.0-py3-none-any.whl", hash = "sha256:7eb063feaecadad9d4d1fd3474cbfeadf3486b64f760a8f2a00fc25392180aba", size = 10242, upload-time = "2023-05-18T22:44:34.287Z" },
 ]
 
 [[package]]
@@ -1041,15 +1039,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
-]
-
-[[package]]
-name = "python-dotenv"
-version = "1.2.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/82/ed/0301aeeac3e5353ef3d94b6ec08bbcabd04a72018415dcb29e588514bba8/python_dotenv-1.2.2.tar.gz", hash = "sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3", size = 50135, upload-time = "2026-03-01T16:00:26.196Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0b/d7/1959b9648791274998a9c3526f6d0ec8fd2233e4d4acce81bbae76b44b2a/python_dotenv-1.2.2-py3-none-any.whl", hash = "sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a", size = 22101, upload-time = "2026-03-01T16:00:25.09Z" },
 ]
 
 [[package]]

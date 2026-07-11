@@ -11,8 +11,10 @@ nav = [
     "index.md",
     "workflows.md",
     "github_apps.md",
-    "image_manifest_config.md",
     "cli.md",
+    { "Config" = [
+        "image_manifest_config.md",
+    ]},
     { "API" = [
         "client_payload.md",
         "dump_event.md"
@@ -86,6 +88,11 @@ name = "md"
 class = "markdown"
 validator = "markdown_exec.validator"
 format = "markdown_exec.formatter"
+[[project.markdown_extensions.pymdownx.superfences.custom_fences]]
+name = "bash"
+class = "bash"
+validator = "markdown_exec.validator"
+format = "markdown_exec.formatter"
 
 [project.markdown_extensions."mkdocs_typer2.markdown:makeExtension"]
 pretty = false
@@ -117,4 +124,3 @@ show_symbol_type_toc = true
 signature_crossrefs = true
 summary = true
 unwrap_annotated = true
-preload_modules = ["goodconf"]

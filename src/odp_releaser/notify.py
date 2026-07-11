@@ -51,6 +51,7 @@ from odp_releaser.make_payload import resolve_client_payload
 from odp_releaser.schemas.dispatch import DeployTarget
 
 _TARGETS_ADAPTER = TypeAdapter(list[DeployTarget])
+DEFAULT_TARGETS_PATH = ".github/deploy_targets.yaml"
 
 TargetsPath = Annotated[
     Path,
@@ -149,7 +150,7 @@ def notify(
     image_repository: ImageRepository = None,
     github_token: GitHubToken = None,
     github_server_url: GitHubServerUrl = "https://github.com",
-    targets_path: TargetsPath = Path(".github/deploy_targets.yaml"),
+    targets_path: TargetsPath = Path(DEFAULT_TARGETS_PATH),
     *,
     dry_run: DryRun = False,
 ) -> None:

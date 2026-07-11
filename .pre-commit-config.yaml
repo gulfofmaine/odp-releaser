@@ -63,7 +63,6 @@ repos:
           - pytest
           - cryptography
           - githubkit
-          - goodconf
           - inline-snapshot
           - pydantic
           - respx

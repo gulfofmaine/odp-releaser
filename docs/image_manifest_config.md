@@ -2,7 +2,7 @@
 icon: lucide/pencil
 ---
 
-# Image manifest config
+# Image manifest
 
 The image manifest is usually stored at `.github/image_manifest.yaml`.
 
@@ -16,14 +16,22 @@ print(ManifestConfig.generate_yaml())
 
 ## API
 
-```python exec="on"
-from odp_releaser.schemas.manifest_config import ManifestConfig, ImageConfig
+```md exec="true" updatetoc="false"
+::: odp_releaser.schemas.manifest_config.ManifestConfig
+    options:
+      heading_level: 3
+      extensions:
+      - griffe_pydantic
+      skip_local_inventory: true
+```
 
-print("### ManifestConfig")
-print(ManifestConfig.generate_markdown().replace("# ", "> "))
-
-print("### ImageConfig")
-print(ImageConfig.generate_markdown().replace("# ", "> "))
+```md exec="true" updatetoc="false"
+::: odp_releaser.schemas.manifest_config.ImageConfig
+    options:
+      heading_level: 3
+      extensions:
+      - griffe_pydantic
+      skip_local_inventory: true
 ```
 
 ### Manifests
@@ -47,19 +55,29 @@ for key, value in payload.value_format_kwargs().items():
         print(f"- `{key}` - `{value}`")
 ```
 
-```python exec="on"
-from odp_releaser.schemas.manifest_config import (
-    KustomizeManifest,
-    HelmManifest,
-    FileManifest,
-)
+```md exec="true" updatetoc="false"
+::: odp_releaser.schemas.manifest_config.KustomizeManifest
+    options:
+      heading_level: 4
+      extensions:
+      - griffe_pydantic
+      skip_local_inventory: true
+```
 
-print("#### KustomizeManifest")
-print(KustomizeManifest.generate_markdown().replace("# ", "> "))
+```md exec="true" updatetoc="false"
+::: odp_releaser.schemas.manifest_config.HelmManifest
+    options:
+      heading_level: 4
+      extensions:
+      - griffe_pydantic
+      skip_local_inventory: true
+```
 
-print("#### HelmManifest")
-print(HelmManifest.generate_markdown().replace("# ", "> "))
-
-print("#### FileManifest")
-print(FileManifest.generate_markdown().replace("# ", "> "))
+```md exec="true" updatetoc="false"
+::: odp_releaser.schemas.manifest_config.FileManifest
+    options:
+      heading_level: 4
+      extensions:
+      - griffe_pydantic
+      skip_local_inventory: true
 ```

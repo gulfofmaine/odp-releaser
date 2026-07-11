@@ -118,7 +118,8 @@ to skip gating entirely.
 ### `.github/deploy_targets.yaml`
 
 A YAML array of deploy targets (a JSON array also parses — YAML is a
-superset of JSON):
+superset of JSON). Generate a starter file with
+`odp-releaser generate-config deploy-targets`:
 
 ```yaml
 - owner: gulfofmaine
