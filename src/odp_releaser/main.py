@@ -8,6 +8,7 @@ from odp_releaser.bump_images import bump_images
 from odp_releaser.generate_config import generate_config
 from odp_releaser.logger import logger
 from odp_releaser.make_payload import make_payload
+from odp_releaser.notify import notify
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -18,6 +19,7 @@ app = typer.Typer(
 app.command()(bump_images)
 app.command()(bump_images_tester)
 app.command()(make_payload)
+app.command()(notify)
 app.command()(generate_config)
 
 

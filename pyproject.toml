@@ -155,6 +155,11 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
 "noxfile.py" = ["T20"]
+# Typer resolves these Annotated option aliases at runtime (via
+# inspect.signature(eval_str=True)), so they must stay imported at module
+# scope and cannot move into a type-checking block.
+"src/odp_releaser/make_payload.py" = ["TC001"]
+"src/odp_releaser/notify.py" = ["TC001"]
 
 
 [tool.pylint]

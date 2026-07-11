@@ -15,6 +15,18 @@ from typing import Annotated, Any
 import typer
 from pydantic import HttpUrl
 
+from odp_releaser.cli_options import (
+    GitHubActor,
+    GitHubEventName,
+    GitHubEventPath,
+    GitHubRefName,
+    GitHubRepository,
+    GitHubRunId,
+    GitHubServerUrl,
+    GitHubSha,
+    GitHubToken,
+    ImageRepository,
+)
 from odp_releaser.github import pr_for_commit
 from odp_releaser.logger import logger
 from odp_releaser.schemas.client_payload import (
@@ -126,68 +138,33 @@ def build_payload(
     )
 
 
-def make_payload(
-    image_name: Annotated[str, typer.Argument(help="Name of the published image")],
-    tag: Annotated[str, typer.Argument(help="Tag applied to the published image")],
-    digest: Annotated[
-        str, typer.Argument(help="Content digest of the published image")
-    ],
-    github_event_name: Annotated[
-        str, typer.Option(envvar="GITHUB_EVENT_NAME", help="Name of the GitHub event")
-    ],
-    github_event_path: Annotated[
-        Path,
-        typer.Option(envvar="GITHUB_EVENT_PATH", help="Path to the event payload JSON"),
-    ],
-    github_repository: Annotated[
-        str,
-        typer.Option(envvar="GITHUB_REPOSITORY", help="`owner/name` of the repo"),
-    ],
-    github_actor: Annotated[
-        str, typer.Option(envvar="GITHUB_ACTOR", help="User who triggered the event")
-    ],
-    github_run_id: Annotated[
-        str, typer.Option(envvar="GITHUB_RUN_ID", help="ID of the workflow run")
-    ],
-    github_ref_name: Annotated[
-        str, typer.Option(envvar="GITHUB_REF_NAME", help="Name of the ref")
-    ],
-    github_sha: Annotated[
-        str, typer.Option(envvar="GITHUB_SHA", help="Git SHA of the commit")
-    ],
-    image_repository: Annotated[
-        str | None,
-        typer.Option(
-            envvar="IMAGE_REPOSITORY",
-            help="Registry/namespace the image was pushed to. Defaults to "
-            "ghcr.io/ + the owner of GITHUB_REPOSITORY.",
-        ),
-    ] = None,
-    github_token: Annotated[
-        str | None,
-        typer.Option(
-            envvar="GITHUB_TOKEN",
-            help="Token used to look up the pull request associated with a "
-            "pushed commit. Without it, push events are dispatched with a "
-            "null pr.",
-        ),
-    ] = None,
-    github_server_url: Annotated[
-        str,
-        typer.Option(envvar="GITHUB_SERVER_URL", help="Base URL of the GitHub server"),
-    ] = "https://github.com",
-) -> None:
-    """Make a client payload for a repository_dispatch call for the given image and GitHub context.
+def resolve_client_payload(
+    *,
+    image_name: str,
+    tag: str,
+    digest: str,
+    github_event_name: str,
+    github_event_path: Path,
+    github_repository: str,
+    github_actor: str,
+    github_run_id: str,
+    github_ref_name: str,
+    github_sha: str,
+    image_repository: str | None,
+    github_token: str | None,
+    github_server_url: str,
+) -> ClientPayload:
+    """Turn the GitHub Actions environment into a :class:`ClientPayload`.
 
-    Reads the event JSON from ``GITHUB_EVENT_PATH`` when it's needed to build
-    the payload (currently only for ``release`` events); ``push`` and
-    ``workflow_dispatch`` events don't read it, so a missing or absent event
-    file is fine for those. Prints ``payload.model_dump_json()`` to stdout so
-    a workflow step can capture it, e.g. into ``CLIENT_PAYLOAD`` or straight
-    into a ``gh api ... /dispatches`` call. All other logging goes to
-    stderr.
+    Computes the image ``repository`` (defaulting to ``ghcr.io/<owner>``),
+    looks up the associated pull request for ``push`` events when a token is
+    available, reads the event JSON from ``github_event_path`` for ``release``
+    events, and delegates to :func:`build_payload`.
+
+    ``pr_for_commit`` is referenced through this module so tests can
+    ``monkeypatch`` ``odp_releaser.make_payload.pr_for_commit``.
     """
-    repository = image_repository or f"ghcr.io/{github_repository.split('/')[0]}"
+    repository = image_repository or f"ghcr.io/{github_repository.partition('/')[0]}"
 
     pr: PrMerge | None = None
     if github_event_name == PUSH_EVENT:
@@ -203,7 +180,7 @@ def make_payload(
     if github_event_name == RELEASE_EVENT:
         event_data = json.loads(github_event_path.read_text())
 
-    payload = build_payload(
+    return build_payload(
         image_name=image_name,
         tag=tag,
         digest=digest,
@@ -217,6 +194,50 @@ def make_payload(
         event_name=github_event_name,
         event_data=event_data,
         pr=pr,
+    )
+
+
+def make_payload(
+    image_name: Annotated[str, typer.Argument(help="Name of the published image")],
+    tag: Annotated[str, typer.Argument(help="Tag applied to the published image")],
+    digest: Annotated[
+        str, typer.Argument(help="Content digest of the published image")
+    ],
+    github_event_name: GitHubEventName,
+    github_event_path: GitHubEventPath,
+    github_repository: GitHubRepository,
+    github_actor: GitHubActor,
+    github_run_id: GitHubRunId,
+    github_ref_name: GitHubRefName,
+    github_sha: GitHubSha,
+    image_repository: ImageRepository = None,
+    github_token: GitHubToken = None,
+    github_server_url: GitHubServerUrl = "https://github.com",
+) -> None:
+    """Make a client payload for a repository_dispatch call for the given image and GitHub context.
+
+    Reads the event JSON from ``GITHUB_EVENT_PATH`` when it's needed to build
+    the payload (currently only for ``release`` events); ``push`` and
+    ``workflow_dispatch`` events don't read it, so a missing or absent event
+    file is fine for those. Prints ``payload.model_dump_json()`` to stdout so
+    a workflow step can capture it, e.g. into ``CLIENT_PAYLOAD`` or straight
+    into a ``gh api ... /dispatches`` call. All other logging goes to
+    stderr.
+    """
+    payload = resolve_client_payload(
+        image_name=image_name,
+        tag=tag,
+        digest=digest,
+        github_event_name=github_event_name,
+        github_event_path=github_event_path,
+        github_repository=github_repository,
+        github_actor=github_actor,
+        github_run_id=github_run_id,
+        github_ref_name=github_ref_name,
+        github_sha=github_sha,
+        image_repository=image_repository,
+        github_token=github_token,
+        github_server_url=github_server_url,
     )
 
     typer.echo(payload.model_dump_json())
