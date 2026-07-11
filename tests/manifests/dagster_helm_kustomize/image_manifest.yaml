@@ -1,0 +1,9 @@
+images:
+  gmri/sea-eagle-brown-3crs:
+    - events:
+        - push
+      kustomize_manifests:
+        - ./kustomization.yaml
+      helm_charts:
+        - path: ./values.yaml
+          dagster_user_code: true

@@ -1,0 +1,43 @@
+deployments:
+  - name: brown-3crs
+    image:
+      repository: gmri/sea-eagle-brown-3crs
+      tag: "ee1cadc"
+      pullPolicy: IfNotPresent
+    dagsterApiGrpcArgs:
+      - "-f"
+      - "/home/neracoos/repo.py"
+    port: 3030
+    volumes:
+      - name: neracoos-filestore-efs
+        persistentVolumeClaim:
+          claimName: neracoos-filestore-efs
+      - name: opt-dagster
+        emptyDir: {}
+    volumeMounts:
+      - name: neracoos-filestore-efs
+        mountPath: /mnt/efs
+      - name: opt-dagster
+        mountPath: /opt/dagster
+    envSecrets:
+      - name: brown-3crs-secret
+    resources:
+      limits:
+        memory: 500Mi
+      requests:
+        memory: 500Mi
+        cpu: 206m
+    readinessProbe:
+      enabled: true
+      exec:
+        command:
+          - pixi
+          - run
+          - dagster
+          - api
+          - grpc-health-check
+          - "-p"
+          - "3030"
+      failureThreshold: 15
+      periodSeconds: 20
+      timeoutSeconds: 10

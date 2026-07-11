@@ -1,0 +1,21 @@
+kind: Kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+
+resources:
+  - github.com/gulfofmaine/NERACOOS_ERDDAP_K8S/datasets/Brown/3CRS/k8s?ref=ee1cadcaaa1b4c8d548b4f588c1662b2f316fde8
+
+patches:
+  - path: mqtt-deployment.patch.yaml
+
+helmCharts:
+  - name: dagster-user-deployments
+    repo: https://dagster-io.github.io/helm
+    version: 1.13.3
+    releaseName: brown-3crs
+    valuesFile: ./values.yaml
+    namespace: sea-eagle
+
+images:
+  - name: gmri/sea-eagle-brown-3crs
+    # newName: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs
+    newTag: "ee1cadc"

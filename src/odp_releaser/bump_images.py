@@ -1,17 +1,69 @@
 import difflib
+from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Protocol
 
 import ruamel.yaml
 import typer
 
 from odp_releaser.github_output import write_github_output
 from odp_releaser.logger import logger
+from odp_releaser.manifests.file import update_file_with_payload
+from odp_releaser.manifests.helm import update_helm_values_with_payload
 from odp_releaser.manifests.kustomize import update_kustomize_with_payload
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import ImageConfig, ManifestConfig
 
-DEFAULT_CONFIG_PATH = Path(".github/image-manifest.yaml")
+DEFAULT_CONFIG_PATH = Path(".github/image_manifest.yaml")
+
+
+class _HasPath(Protocol):
+    path: Path
+
+
+def _apply_manifest[ManifestT: _HasPath](
+    manifest: ManifestT,
+    update_fn: Callable[[Path, str, ManifestT, ClientPayload, list[str]], str],
+    config_path: Path,
+    payload: ClientPayload,
+    commit_message: list[str],
+    *,
+    dry_run: bool,
+) -> bool:
+    """Resolve, update, diff and (unless ``dry_run``) write a single manifest.
+
+    Returns ``True`` when the update changed the manifest's contents.
+    """
+    manifest_path = (config_path.parent / manifest.path).resolve()
+    try:
+        # Keep commit messages and logs readable (and stable across runners)
+        # by referring to manifests relative to the working directory.
+        display_path = manifest_path.relative_to(Path.cwd())
+    except ValueError:
+        display_path = manifest_path
+    original_manifest = manifest_path.read_text()
+    updated_manifest = update_fn(
+        display_path, original_manifest, manifest, payload, commit_message
+    )
+
+    changed = updated_manifest != original_manifest
+
+    diff = difflib.unified_diff(
+        original_manifest.splitlines(),
+        updated_manifest.splitlines(),
+        fromfile="original",
+        tofile="updated",
+        lineterm="",
+    )
+    logger.info(f"Diff for {manifest_path}:\n{'\n'.join(diff)}")
+
+    if not dry_run:
+        manifest_path.write_text(updated_manifest)
+        logger.warning(f"Wrote updated manifest for {manifest_path}")
+    else:
+        logger.warning(f"Dry run, not writing updated manifest for {manifest_path}")
+
+    return changed
 
 
 def bump_images(
@@ -45,7 +97,6 @@ def bump_images(
     logger.info(f"Dry run is: {dry_run}")
 
     payload = ClientPayload.model_validate_json(client_payload)
-    # print(f"Parsed manifest config: {config}")
     logger.debug("Parsed client payload:")
     logger.debug(payload)
 
@@ -107,34 +158,36 @@ def bump_images(
             update_mode = "pull_request"
 
         for image_config in filtered_configs:
-            for manifest in image_config.kustomize_manifests:
-                kustomize_path = (config_path.parent / manifest.path).resolve()
-                original_manifest = kustomize_path.read_text()
-                updated_manifest = update_kustomize_with_payload(
-                    kustomize_path,
-                    original_manifest,
-                    manifest,
+            for kustomize_manifest in image_config.kustomize_manifests:
+                if _apply_manifest(
+                    kustomize_manifest,
+                    update_kustomize_with_payload,
+                    config_path,
                     payload,
                     commit_message,
-                )
-                if updated_manifest != original_manifest:
+                    dry_run=dry_run,
+                ):
                     changed = True
-                diff = difflib.unified_diff(
-                    original_manifest.splitlines(),
-                    updated_manifest.splitlines(),
-                    fromfile="original",
-                    tofile="updated",
-                    lineterm="",
-                )
-                diff_text = "\n".join(diff)
-                logger.info(f"Diff for {kustomize_path}:\n{diff_text}")
-                if not dry_run:
-                    kustomize_path.write_text(updated_manifest)
-                    logger.warning(f"Wrote updated manifest for {kustomize_path}")
-                else:
-                    logger.warning(
-                        f"Dry run, not writing updated manifest for {kustomize_path}"
-                    )
+            for helm_manifest in image_config.helm_charts:
+                if _apply_manifest(
+                    helm_manifest,
+                    update_helm_values_with_payload,
+                    config_path,
+                    payload,
+                    commit_message,
+                    dry_run=dry_run,
+                ):
+                    changed = True
+            for file_manifest in image_config.file_manifests:
+                if _apply_manifest(
+                    file_manifest,
+                    update_file_with_payload,
+                    config_path,
+                    payload,
+                    commit_message,
+                    dry_run=dry_run,
+                ):
+                    changed = True
 
     logger.info(f"Commit message: \n{'\n'.join(commit_message)}")
 

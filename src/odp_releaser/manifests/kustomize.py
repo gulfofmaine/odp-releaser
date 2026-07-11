@@ -2,7 +2,12 @@ from io import StringIO
 from pathlib import Path
 
 from odp_releaser.logger import logger
-from odp_releaser.manifests.helpers import open_for_editing, set_value, yaml
+from odp_releaser.manifests.helpers import (
+    apply_set_templates,
+    open_for_editing,
+    set_value,
+    yaml,
+)
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import KustomizeManifest
 
@@ -43,18 +48,7 @@ def update_kustomize_with_payload(
         message = set_value(processor, set_path, payload.new_tag(), mustexist=True)
     commit_message.append(f"  - {message}")
 
-    for set_path, value in manifest.set.items():
-        try:
-            formatted_value = value.format(
-                new_tag=payload.new_tag(),
-                git_sha=payload.git_sha,
-                digest=payload.digest,
-            )
-            message = set_value(processor, set_path, formatted_value, mustexist=True)
-            commit_message.append(f"  - {message}")
-        except KeyError as e:
-            msg = f"Error setting value for path '{set_path}' with value '{value}'"
-            raise KeyError(msg) from e
+    apply_set_templates(processor, manifest.set, payload, commit_message)
 
     stream = StringIO()
 

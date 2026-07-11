@@ -4,6 +4,7 @@ from yamlpath import Processor
 from yamlpath.common import Parsers
 
 from odp_releaser.logger import logger
+from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.yamlpath_logger import YamlPathLoggerAdapter
 
 yaml = Parsers.get_yaml_editor()
@@ -33,3 +34,26 @@ def set_value(
     logger.warning(f"Nodes for path {path}: {list(processor.get_nodes(path))}")
     processor.set_value(path, value, mustexist=mustexist)
     return f"Set value for path {path} to {value}"
+
+
+def apply_set_templates(
+    processor: Processor,
+    set_paths: dict[str, str],
+    payload: ClientPayload,
+    commit_message: list[str],
+) -> None:
+    """Apply each ``manifest.set`` path/value onto ``processor``.
+
+    Values are templated with ``{new_tag}``, ``{git_sha}`` and ``{digest}``
+    drawn from ``payload``. A missing template variable raises a ``KeyError``
+    wrapped with the offending path and value to aid debugging. Each applied
+    change is appended to ``commit_message``.
+    """
+    for set_path, value in set_paths.items():
+        try:
+            formatted_value = value.format(**payload.value_format_kwargs())
+        except KeyError as e:
+            msg = f"Error setting value for path '{set_path}' with value '{value}'"
+            raise KeyError(msg) from e
+        message = set_value(processor, set_path, formatted_value, mustexist=True)
+        commit_message.append(f"  - {message}")

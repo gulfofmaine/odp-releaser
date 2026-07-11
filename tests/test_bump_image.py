@@ -71,6 +71,34 @@ def test_success_path_writes_github_output(
     assert "Triggered by" in outputs["commit_message"]
 
 
+def test_dagster_helm_and_kustomize_dry_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    client_payload = load_client_payload("push")
+    set_payload_image("gmri/sea-eagle-brown-3crs", client_payload)
+
+    bump_images(
+        config_path=MANIFESTS_DIR / "dagster_helm_kustomize" / "image_manifest.yaml",
+        client_payload=client_payload.model_dump_json(),
+        dry_run=True,
+    )
+
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "true"
+
+    commit_message = outputs["commit_message"]
+    # Both manifests are visited...
+    assert "Updated kustomize manifest" in commit_message
+    assert "Updated helm values" in commit_message
+    # ...and both would receive the new tag (push event -> payload.tag).
+    new_tag = client_payload.new_tag()
+    assert f"newTag to {new_tag}" in commit_message
+    assert f"image/tag to {new_tag}" in commit_message
+
+
 def test_no_config_for_image_reports_unchanged(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -48,3 +48,12 @@ class ClientPayload(BaseModel):
         if self.source.event == "release":
             return self.source.ref
         return self.tag
+
+    def value_format_kwargs(self) -> dict[str, str]:
+        """Keyword arguments for formatting strings with payload values."""
+        return {
+            "new_tag": self.new_tag(),
+            "git_sha": self.git_sha,
+            "digest": self.digest,
+            "payload": self.model_dump_json(),
+        }
