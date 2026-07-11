@@ -67,6 +67,16 @@ def docs(session: nox.Session) -> None:
         session.run("zensical", "build", "--clean", *session.posargs)
 
 
+@nox.session(reuse_venv=True, default=False)
+def docs_clean(_) -> None:
+    """
+    Clean the built documentation.
+    """
+    build_path = DIR.joinpath("site")
+    if build_path.exists():
+        shutil.rmtree(build_path)
+
+
 @nox.session(default=False)
 def build(session: nox.Session) -> None:
     """

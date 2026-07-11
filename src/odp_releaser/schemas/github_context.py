@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -11,9 +13,9 @@ class PrMerge(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    number: int = Field(..., description="Number of the pull request")
-    title: str = Field(..., description="Title of the pull request")
-    html_url: str = Field(..., description="URL of the pull request")
+    number: Annotated[int, Field(description="Number of the pull request")]
+    title: Annotated[str, Field(description="Title of the pull request")]
+    html_url: Annotated[str, Field(description="URL of the pull request")]
 
 
 def parse_pr_merge(text: str) -> PrMerge | None:
@@ -33,9 +35,9 @@ class ReleaseObject(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    tag_name: str = Field(..., description="Tag associated with the release")
-    name: str | None = Field(None, description="Name of the release")
-    html_url: str = Field(..., description="URL of the release")
+    tag_name: Annotated[str, Field(description="Tag associated with the release")]
+    name: Annotated[str | None, Field(description="Name of the release")] = None
+    html_url: Annotated[str, Field(description="URL of the release")]
 
 
 class ReleaseEvent(BaseModel):
@@ -43,8 +45,10 @@ class ReleaseEvent(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    action: str = Field(..., description="Action that triggered the event")
-    release: ReleaseObject = Field(..., description="Release associated with the event")
+    action: Annotated[str, Field(description="Action that triggered the event")]
+    release: Annotated[
+        ReleaseObject, Field(description="Release associated with the event")
+    ]
 
 
 class HeadCommit(BaseModel):
@@ -52,8 +56,8 @@ class HeadCommit(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    id: str = Field(..., description="SHA of the head commit")
-    url: str = Field(..., description="URL of the head commit")
+    id: Annotated[str, Field(description="SHA of the head commit")]
+    url: Annotated[str, Field(description="URL of the head commit")]
 
 
 class PushEvent(BaseModel):
@@ -61,11 +65,11 @@ class PushEvent(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    ref: str = Field(..., description="Full ref that was pushed")
-    after: str = Field(..., description="SHA of the commit after the push")
-    head_commit: HeadCommit | None = Field(
-        None, description="Head commit of the push, if any"
-    )
+    ref: Annotated[str, Field(description="Full ref that was pushed")]
+    after: Annotated[str, Field(description="SHA of the commit after the push")]
+    head_commit: Annotated[
+        HeadCommit | None, Field(description="Head commit of the push, if any")
+    ] = None
 
 
 class WorkflowDispatchEvent(BaseModel):
@@ -73,30 +77,33 @@ class WorkflowDispatchEvent(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    ref: str = Field(..., description="Ref the workflow was dispatched on")
-    inputs: dict[str, str] | None = Field(
-        None, description="Inputs provided to the workflow dispatch"
-    )
+    ref: Annotated[str, Field(description="Ref the workflow was dispatched on")]
+    inputs: Annotated[
+        dict[str, str] | None,
+        Field(description="Inputs provided to the workflow dispatch"),
+    ] = None
 
 
 class GitHubContext(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    ref: str = Field(..., description="Branch or tag name")
-    sha: str = Field(..., description="Git SHA of the commit")
-    repository: str = Field(..., description="Repository name")
-    repository_owner: str = Field(..., description="Repository owner")
-    actor: str = Field(..., description="User who triggered the event")
-    workflow: str = Field(..., description="Workflow name")
-    head_ref: str = Field(
-        ..., description="Head reference for the pull request or branch"
-    )
-    base_ref: str = Field(
-        ..., description="Base reference for the pull request or branch"
-    )
-    event_name: str = Field(..., description="Name of the GitHub event")
-    ref_name: str = Field(..., description="Name of the reference")
-    ref_type: str = Field(..., description="Type of the reference (branch or tag)")
-    workflow_ref: str = Field(..., description="Reference for the workflow")
-    workflow_sha: str = Field(..., description="SHA for the workflow")
-    triggering_actor: str = Field(..., description="User who triggered the workflow")
+    ref: Annotated[str, Field(description="Branch or tag name")]
+    sha: Annotated[str, Field(description="Git SHA of the commit")]
+    repository: Annotated[str, Field(description="Repository name")]
+    repository_owner: Annotated[str, Field(description="Repository owner")]
+    actor: Annotated[str, Field(description="User who triggered the event")]
+    workflow: Annotated[str, Field(description="Workflow name")]
+    head_ref: Annotated[
+        str, Field(description="Head reference for the pull request or branch")
+    ]
+    base_ref: Annotated[
+        str, Field(description="Base reference for the pull request or branch")
+    ]
+    event_name: Annotated[str, Field(description="Name of the GitHub event")]
+    ref_name: Annotated[str, Field(description="Name of the reference")]
+    ref_type: Annotated[str, Field(description="Type of the reference (branch or tag)")]
+    workflow_ref: Annotated[str, Field(description="Reference for the workflow")]
+    workflow_sha: Annotated[str, Field(description="SHA for the workflow")]
+    triggering_actor: Annotated[
+        str, Field(description="User who triggered the workflow")
+    ]
