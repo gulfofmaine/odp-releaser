@@ -18,6 +18,7 @@
 #         # image_repository: ghcr.io/gulfofmaine/my-service  # optional
 #         # environment: production                           # optional gate
 #         # deploy_targets_path: .github/deploy_targets.yaml  # optional
+#         # verbosity: 1                                       # optional, default
 #       secrets:
 #         dispatch_app_id: ${{ secrets.DISPATCH_APP_ID }}
 #         dispatch_app_private_key: ${{ secrets.DISPATCH_APP_PRIVATE_KEY }}
@@ -59,6 +60,13 @@ on:
         required: false
         type: string
         default: .github/deploy_targets.yaml
+      verbosity:
+        description: >-
+          CLI verbosity: 0=warning, 1=info (default), 2 or more=debug. Maps to
+          the CLI's -v/-vv/-vvv flags (capped at 3).
+        required: false
+        type: number
+        default: 1
     secrets:
       dispatch_app_id:
         description: App ID of the GitHub App used to dispatch to deploy repos.
@@ -103,6 +111,13 @@ jobs:
           DISPATCH_APP_PRIVATE_KEY: ${{ secrets.dispatch_app_private_key }}
           DISPATCH_APPS: ${{ secrets.dispatch_apps }}
           ODP_RELEASER_REF: ${{ github.job_workflow_sha }}
+          VERBOSITY: ${{ inputs.verbosity }}
         run: |
+          case "$VERBOSITY" in
+            0) FLAGS=() ;;
+            1) FLAGS=(-v) ;;
+            2) FLAGS=(-vv) ;;
+            *) FLAGS=(-vvv) ;;
+          esac
           uvx --from "git+https://github.com/gulfofmaine/odp-releaser@${ODP_RELEASER_REF}" \
-            odp-releaser notify "$IMAGE_NAME" "$TAG" "$DIGEST"
+            odp-releaser "${FLAGS[@]}" notify "$IMAGE_NAME" "$TAG" "$DIGEST"

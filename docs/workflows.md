@@ -75,6 +75,7 @@ jobs:
       # image_repository: ghcr.io/gulfofmaine/my-service  # optional
       # environment: production                           # optional gate
       # deploy_targets_path: .github/deploy_targets.yaml  # optional
+      # verbosity: 1                                       # optional, default
     secrets:
       dispatch_app_id: ${{ secrets.DISPATCH_APP_ID }}
       dispatch_app_private_key: ${{ secrets.DISPATCH_APP_PRIVATE_KEY }}
@@ -95,6 +96,7 @@ above.
 | `image_repository` | no | `ghcr.io/<owner>` | Image repository, e.g. `ghcr.io/owner/name`. |
 | `environment` | no | `""` | GitHub environment used to gate the dispatch behind protection rules. Empty means no gating. |
 | `deploy_targets_path` | no | `.github/deploy_targets.yaml` | Path to the deploy-targets file in the calling repo. |
+| `verbosity` | no | `1` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
 
 ### Secrets
 
@@ -165,6 +167,7 @@ jobs:
       # config_path: .github/image_manifest.yaml            # optional
       # git_user_name: odp-releaser[bot]                    # optional
       # git_user_email: odp-releaser[bot]@users.noreply.github.com
+      # verbosity: 1                                       # optional, default
     secrets:
       ci_app_id: ${{ secrets.CI_APP_ID }} # optional
       ci_app_private_key: ${{ secrets.CI_APP_PRIVATE_KEY }} # optional
@@ -184,6 +187,7 @@ succession.
 | `config_path` | no | `.github/image_manifest.yaml` | Path to the image manifest config file. |
 | `git_user_name` | no | `odp-releaser[bot]` | Git author/committer name for direct commits. |
 | `git_user_email` | no | `odp-releaser[bot]@users.noreply.github.com` | Git author/committer email for direct commits. |
+| `verbosity` | no | `1` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
 
 ### Secrets
 
