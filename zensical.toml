@@ -10,10 +10,10 @@ docs_dir = "docs"
 nav = [
     "index.md",
     "workflows.md",
+    "image_manifest_config.md",
     "cli.md",
-    { "API and Configuration" = [
+    { "API" = [
         "client_payload.md",
-        "image_manifest_config.md",
         "dump_event.md"
     ]}
 ]
