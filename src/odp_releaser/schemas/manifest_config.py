@@ -102,29 +102,20 @@ class ImageConfig(BaseModel):
             ),
         ),
     ] = "commit"
-    kustomize_manifests: Annotated[
-        list[KustomizeManifest],
-        Field(
-            description="List of Kustomize manifests to set for the image",
-            default_factory=list,
-        ),
-    ]
-    helm_charts: Annotated[
-        list[HelmManifest],
-        Field(
-            description="List of Helm values files to update for the image",
-            default_factory=list,
-        ),
-    ]
-    file_manifests: Annotated[
-        list[FileManifest],
-        Field(
-            description=(
-                "List of generic YAML or JSON manifests updated via set paths"
-            ),
-            default_factory=list,
-        ),
-    ]
+    # Assignment form (not Annotated) so mypy's pydantic plugin sees the
+    # default_factory and treats these as optional constructor arguments.
+    kustomize_manifests: list[KustomizeManifest] = Field(
+        description="List of Kustomize manifests to set for the image",
+        default_factory=list,
+    )
+    helm_charts: list[HelmManifest] = Field(
+        description="List of Helm values files to update for the image",
+        default_factory=list,
+    )
+    file_manifests: list[FileManifest] = Field(
+        description="List of generic YAML or JSON manifests updated via set paths",
+        default_factory=list,
+    )
 
 
 class ManifestConfig(BaseModel):

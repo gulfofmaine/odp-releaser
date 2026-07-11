@@ -13,7 +13,8 @@ nav = [
     "github_apps.md",
     "cli.md",
     { "Config" = [
-        "image_manifest_config.md",
+        "config/deploy_targets.md",
+        "config/image_manifest.md",
     ]},
     { "API" = [
         "client_payload.md",

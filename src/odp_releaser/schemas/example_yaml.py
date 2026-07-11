@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 _SeenComments = set[object]
 
 
-def _field_default(field: Any) -> object:  # noqa: ANN401
+def _field_default(field: Any) -> object:
     """Best-effort default value for a pydantic ``FieldInfo``."""
     if field.default_factory is not None:
         return field.default_factory()

@@ -86,7 +86,7 @@ from the org it was given to.
 ### 5. Wire your own app into `bump-images.yml` (PR-mode CI trigger)
 
 If any `ImageConfig` in your manifest config uses `update_mode: pull_request`
-(see [Image manifest config](image_manifest_config.md)), the bump workflow
+(see [Image manifest config](config/image_manifest.md)), the bump workflow
 opens a pull request instead of committing directly. A PR (or push) made with
 the default `GITHUB_TOKEN` does **not** trigger further workflow runs — this
 is a deliberate GitHub Actions anti-recursion rule — so your repo's own CI

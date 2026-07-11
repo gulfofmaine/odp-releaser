@@ -8,6 +8,12 @@ The image manifest is usually stored at `.github/image_manifest.yaml`.
 
 ## Example image manifest
 
+Example `image_manifest.yaml` with documentation can be generated via the CLI.
+
+```bash
+$ odp-releaser generate-config image-manifest
+```
+
 ```python exec="on" result="yaml"
 from odp_releaser.schemas.manifest_config import ManifestConfig
 
@@ -40,7 +46,7 @@ For each of the manifest types, the `set` key takes a dictionary of [yamlpath](h
 
 #### Templated `set` values:
 
-The values are templated with parts of the [client payload](./client_payload.md).
+The values are templated with parts of the [client payload](../client_payload.md).
 
 ##### Example values
 

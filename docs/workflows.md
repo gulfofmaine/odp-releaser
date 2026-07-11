@@ -200,7 +200,7 @@ succession.
 
 Each image in `.github/image_manifest.yaml` sets `update_mode: commit`
 (default) or `update_mode: pull_request` per `ImageConfig` — see
-[Image manifest config](image_manifest_config.md) for the full schema. In
+[Image manifest config](config/image_manifest.md) for the full schema. In
 `commit` mode the workflow pushes the manifest edits straight to the
 checked-out branch (normally the default branch); in `pull_request` mode it
 opens (or updates) a pull request on a stable branch named
@@ -239,7 +239,7 @@ config to an explicit list of trusted `owner/name` slugs; `bump-images`
 rejects (non-zero exit, no manifest changes) any payload whose `repo` isn't
 in that list. This is the deploy repo's own defense-in-depth check,
 independent of which source orgs the deploy org's dispatch app trusts — see
-[Image manifest config](image_manifest_config.md) for the field and
+[Image manifest config](config/image_manifest.md) for the field and
 [GitHub Apps](github_apps.md) for the credential-level trust boundary.
 
 ## Security notes
