@@ -14,20 +14,41 @@ def update_kustomize_with_payload(
     payload: ClientPayload,
     commit_message: list[str],
 ) -> str:
+    """Update an image entry (and any extra ``set`` paths) in a kustomization file.
+
+    ``manifest.pin`` controls which field on the matching
+    ``/images[name=...]`` entry is written:
+
+    - ``"tag"`` (the default): ``newTag`` is set to the release tag.
+    - ``"digest"``: the immutable ``digest`` field is set to the image
+      digest instead.
+
+    Only the pinned field is written. Kustomize itself prefers ``digest``
+    over ``newTag`` when both are present, but this function doesn't also
+    clear or set the other field -- if a manifest already carries the field
+    for the *other* pin mode (e.g. a stale ``newTag`` left over from before a
+    switch to digest pinning), that's left untouched; reconciling it is on
+    the operator.
+    """
     processor = open_for_editing(kustomize_text)
     logger.debug(f"Original manifest for {kustomize_path}: {processor.data}")
 
     commit_message.append(f"- Updated kustomize manifest at {kustomize_path}")
 
-    set_path = f"""/images[name="{payload.image_name}"]/newTag"""
-    formatted_value = f"'{payload.new_tag()}'"
-    message = set_value(processor, set_path, formatted_value, mustexist=True)
+    if manifest.pin == "digest":
+        set_path = f"""/images[name="{payload.image_name}"]/digest"""
+        message = set_value(processor, set_path, payload.digest, mustexist=False)
+    else:
+        set_path = f"""/images[name="{payload.image_name}"]/newTag"""
+        message = set_value(processor, set_path, payload.new_tag(), mustexist=True)
     commit_message.append(f"  - {message}")
 
     for set_path, value in manifest.set.items():
         try:
             formatted_value = value.format(
-                new_tag=payload.new_tag(), git_sha=payload.git_sha
+                new_tag=payload.new_tag(),
+                git_sha=payload.git_sha,
+                digest=payload.digest,
             )
             message = set_value(processor, set_path, formatted_value, mustexist=True)
             commit_message.append(f"  - {message}")

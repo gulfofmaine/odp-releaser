@@ -5,10 +5,13 @@ from typing import Annotated
 import ruamel.yaml
 import typer
 
+from odp_releaser.github_output import write_github_output
 from odp_releaser.logger import logger
 from odp_releaser.manifests.kustomize import update_kustomize_with_payload
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import ImageConfig, ManifestConfig
+
+DEFAULT_CONFIG_PATH = Path(".github/image-manifest.yaml")
 
 
 def bump_images(
@@ -16,9 +19,15 @@ def bump_images(
         Path,
         typer.Argument(
             envvar="IMAGE_MANIFEST_CONFIG_PATH",
-            help="Path to the image manifest configuration file. Can be loaded from env: `IMAGE_MANIFEST_CONFIG_PATH`",
+            help=(
+                "Path to the image manifest configuration file. Paths inside "
+                "the config (manifest paths) are resolved relative to this "
+                "file's parent directory. Can be loaded from env: "
+                "`IMAGE_MANIFEST_CONFIG_PATH`"
+            ),
         ),
-    ],
+    ] = DEFAULT_CONFIG_PATH,
+    *,
     client_payload: Annotated[
         str,
         typer.Argument(
@@ -52,12 +61,27 @@ def bump_images(
     logger.debug("Parsed manifest config:")
     logger.debug(config)
 
+    if (
+        config.allowed_source_repos is not None
+        and payload.repo not in config.allowed_source_repos
+    ):
+        message = (
+            f"Source repository '{payload.repo}' is not in the "
+            "allowed_source_repos configured for this deployment"
+        )
+        logger.error(message)
+        typer.echo(message, err=True)
+        raise typer.Exit(1)
+
     commit_message = [
         f"Update image {payload.image_name} to {payload.new_tag()}",
         "",
         f"Triggered by {payload.source.url}",
         "",
     ]
+
+    changed = False
+    update_mode = "commit"
 
     if image_configs := config.images.get(payload.image_name):
         logger.debug("Configs for the image:")
@@ -73,18 +97,30 @@ def bump_images(
         logger.debug("Filtered configs")
         logger.debug(filtered_configs)
 
+        update_modes = {image_config.update_mode for image_config in filtered_configs}
+        if len(update_modes) > 1:
+            logger.warning(
+                f"Mixed update_mode values across matching configs for "
+                f"{payload.image_name}: {sorted(update_modes)}; using pull_request"
+            )
+        if "pull_request" in update_modes:
+            update_mode = "pull_request"
+
         for image_config in filtered_configs:
             for manifest in image_config.kustomize_manifests:
                 kustomize_path = (config_path.parent / manifest.path).resolve()
+                original_manifest = kustomize_path.read_text()
                 updated_manifest = update_kustomize_with_payload(
                     kustomize_path,
-                    kustomize_path.read_text(),
+                    original_manifest,
                     manifest,
                     payload,
                     commit_message,
                 )
+                if updated_manifest != original_manifest:
+                    changed = True
                 diff = difflib.unified_diff(
-                    (config_path.parent / manifest.path).read_text().splitlines(),
+                    original_manifest.splitlines(),
                     updated_manifest.splitlines(),
                     fromfile="original",
                     tofile="updated",
@@ -101,6 +137,16 @@ def bump_images(
                     )
 
     logger.info(f"Commit message: \n{'\n'.join(commit_message)}")
+
+    sanitized_image_name = payload.image_name.replace("/", "-")
+    write_github_output(
+        {
+            "changed": "true" if changed else "false",
+            "update_mode": update_mode,
+            "branch_name": f"odp-releaser/bump-{sanitized_image_name}",
+            "commit_message": "\n".join(commit_message),
+        }
+    )
 
 
 if __name__ == "__main__":

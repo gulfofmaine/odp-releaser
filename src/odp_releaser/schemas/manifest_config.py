@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from goodconf import Field, GoodConf
 from pydantic import model_validator
@@ -16,6 +16,17 @@ class KustomizeManifest(GoodConf):
             default_factory=dict,
         ),
     ]
+    pin: Annotated[
+        Literal["tag", "digest"],
+        Field(
+            ...,
+            description=(
+                "Whether the kustomize images entry pins the tag (newTag) or "
+                "the immutable digest (digest)"
+            ),
+            initial=lambda: "tag",
+        ),
+    ] = "tag"
 
     @model_validator(mode="before")
     @classmethod
@@ -47,6 +58,17 @@ class ImageConfig(GoodConf):
             initial=lambda: ["push", "publish"],
         ),
     ] = None
+    update_mode: Annotated[
+        Literal["commit", "pull_request"],
+        Field(
+            ...,
+            description=(
+                "Whether to commit the change directly or open a pull "
+                "request for review"
+            ),
+            initial=lambda: "commit",
+        ),
+    ] = "commit"
     # copy_to_ecr: Annotated[
     #     bool,
     #     Field(
@@ -85,14 +107,6 @@ class ImageConfig(GoodConf):
     #         initial=lambda: ["gulfofmaine/odp", "ioos/team2"],
     #     ),
     # ] = None
-    # allowed_source_repos: Annotated[
-    #     list[str] | None,
-    #     Field(
-    #         ...,
-    #         description="Allowed source repositories",
-    #         initial=lambda: ["gulfofmaine/Neracoos-1-Buoy-App", "ioos/buoy_retriever"],
-    #     ),
-    # ] = None
 
 
 class ManifestConfig(GoodConf):
@@ -102,13 +116,35 @@ class ManifestConfig(GoodConf):
             description="Mapping of image names to their configurations",
             initial=lambda: {
                 "gmri/neracoos-mariners-dashboard": [
-                    ImageConfig.get_initial(events=["publish"]),
+                    ImageConfig.get_initial(
+                        events=["publish"], update_mode="pull_request"
+                    ),
                     ImageConfig.get_initial(
                         events=["push"],
-                        kustomize_manifests=["apps/mariners-dev/kustomization.yaml"],
+                        kustomize_manifests=[
+                            {
+                                "path": "apps/mariners-dev/kustomization.yaml",
+                                "pin": "digest",
+                            }
+                        ],
                     ),
                 ]
             },
         ),
     ]
     """Mapping of image names to manifests to update"""
+
+    allowed_source_repos: Annotated[
+        list[str] | None,
+        Field(
+            ...,
+            description=(
+                "Full repo names (owner/name) allowed to trigger bumps; "
+                "None disables the check"
+            ),
+            initial=lambda: [
+                "gulfofmaine/Neracoos-1-Buoy-App",
+                "ioos/buoy_retriever",
+            ],
+        ),
+    ] = None
