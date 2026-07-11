@@ -56,8 +56,10 @@ def test_tag_pin_sets_new_tag_and_leaves_no_digest() -> None:
         commit_message,
     )
 
-    assert "newTag: 7c8d9e0" in result
+    assert 'newTag: "7c8d9e0"' in result
     assert "digest:" not in result
+    assert not result.startswith("---")
+    assert "\n---\n" not in result
 
 
 def test_digest_pin_sets_digest_and_leaves_new_tag_untouched() -> None:
@@ -75,7 +77,7 @@ def test_digest_pin_sets_digest_and_leaves_new_tag_untouched() -> None:
         commit_message,
     )
 
-    assert "digest: sha256:abc123" in result
+    assert 'digest: "sha256:abc123"' in result
     # newTag is left as it was before the update -- only the pinned field
     # ("digest" here) gets written.
     assert 'newTag: "5763586"' in result

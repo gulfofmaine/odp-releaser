@@ -2,12 +2,13 @@ from tempfile import NamedTemporaryFile
 
 from yamlpath import Processor
 from yamlpath.common import Parsers
+from yamlpath.enums import YAMLValueFormats
 
 from odp_releaser.logger import logger
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.yamlpath_logger import YamlPathLoggerAdapter
 
-yaml = Parsers.get_yaml_editor()
+yaml = Parsers.get_yaml_editor(explicit_start=False)
 yamlpath_logger = YamlPathLoggerAdapter(logger)
 
 
@@ -29,10 +30,14 @@ def open_for_editing(manifest_text: str) -> Processor:
 
 
 def set_value(
-    processor: Processor, path: str, value: str, mustexist: bool = True
+    processor: Processor,
+    path: str,
+    value: str,
+    mustexist: bool = True,
+    value_format: YAMLValueFormats = YAMLValueFormats.DEFAULT,
 ) -> str:
-    logger.warning(f"Nodes for path {path}: {list(processor.get_nodes(path))}")
-    processor.set_value(path, value, mustexist=mustexist)
+    logger.debug(f"Nodes for path {path}: {list(processor.get_nodes(path))}")
+    processor.set_value(path, value, mustexist=mustexist, value_format=value_format)
     return f"Set value for path {path} to {value}"
 
 

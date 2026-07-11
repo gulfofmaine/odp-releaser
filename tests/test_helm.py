@@ -48,7 +48,7 @@ def test_dagster_user_code_updates_matching_tag_and_preserves_rest() -> None:
     )
 
     # The matching deployment's tag is bumped to the new tag.
-    assert "tag: 9f8e7d6" in result
+    assert 'tag: "9f8e7d6"' in result
     assert 'tag: "ee1cadc"' not in result
 
     # Untouched keys survive intact.
@@ -57,6 +57,10 @@ def test_dagster_user_code_updates_matching_tag_and_preserves_rest() -> None:
     assert "grpc-health-check" in result
     assert "repository: gmri/sea-eagle-brown-3crs" in result
     assert "pullPolicy: IfNotPresent" in result
+
+    # The fixture has no document-start marker, and none is added.
+    assert not result.startswith("---")
+    assert "\n---\n" not in result
 
 
 def test_non_matching_image_warns_and_leaves_file_unchanged(
@@ -98,3 +102,4 @@ def test_set_templates_apply_to_values_file() -> None:
     )
 
     assert "tag: 9f8e7d6" in result
+    assert 'tag: "9f8e7d6"' not in result

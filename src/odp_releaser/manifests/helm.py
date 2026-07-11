@@ -1,6 +1,8 @@
 from io import StringIO
 from pathlib import Path
 
+from yamlpath.enums import YAMLValueFormats
+
 from odp_releaser.logger import logger
 from odp_releaser.manifests.helpers import (
     apply_set_templates,
@@ -44,7 +46,13 @@ def update_helm_values_with_payload(
         tag_path = f'/deployments[image.repository="{payload.image_name}"]/image/tag'
         matches = list(processor.get_nodes(tag_path, mustexist=False))
         if matches:
-            message = set_value(processor, tag_path, payload.new_tag(), mustexist=True)
+            message = set_value(
+                processor,
+                tag_path,
+                payload.new_tag(),
+                mustexist=True,
+                value_format=YAMLValueFormats.DQUOTE,
+            )
             commit_message.append(f"  - {message}")
         else:
             logger.warning(

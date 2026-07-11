@@ -1,6 +1,8 @@
 from io import StringIO
 from pathlib import Path
 
+from yamlpath.enums import YAMLValueFormats
+
 from odp_releaser.logger import logger
 from odp_releaser.manifests.helpers import (
     apply_set_templates,
@@ -42,10 +44,22 @@ def update_kustomize_with_payload(
 
     if manifest.pin == "digest":
         set_path = f"""/images[name="{payload.image_name}"]/digest"""
-        message = set_value(processor, set_path, payload.digest, mustexist=False)
+        message = set_value(
+            processor,
+            set_path,
+            payload.digest,
+            mustexist=False,
+            value_format=YAMLValueFormats.DQUOTE,
+        )
     else:
         set_path = f"""/images[name="{payload.image_name}"]/newTag"""
-        message = set_value(processor, set_path, payload.new_tag(), mustexist=True)
+        message = set_value(
+            processor,
+            set_path,
+            payload.new_tag(),
+            mustexist=True,
+            value_format=YAMLValueFormats.DQUOTE,
+        )
     commit_message.append(f"  - {message}")
 
     apply_set_templates(processor, manifest.set, payload, commit_message)
