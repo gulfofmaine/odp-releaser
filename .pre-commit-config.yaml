@@ -61,10 +61,12 @@ repos:
         additional_dependencies:
           - nox
           - pytest
+          - cryptography
           - githubkit
           - goodconf
           - inline-snapshot
           - pydantic
+          - respx
           - typer
           - rich
           - ruamel.yaml
