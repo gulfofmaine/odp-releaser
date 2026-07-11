@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import respx
+import ruamel.yaml
 import typer
 import typer.testing
 from pydantic import ValidationError
@@ -25,7 +26,9 @@ SHA = "5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c"
 
 
 def _write_targets(path: Path, targets: list[dict[str, str]]) -> None:
-    path.write_text(json.dumps(targets))
+    yaml = ruamel.yaml.YAML(typ="safe", pure=True)
+    with path.open("w", encoding="utf-8") as handle:
+        yaml.dump(targets, handle)
 
 
 def _env(
@@ -99,7 +102,7 @@ def _mock_target(
 
 def test_notify_no_targets_file(tmp_path: Path) -> None:
     summary = tmp_path / "summary"
-    missing = tmp_path / "does-not-exist.json"
+    missing = tmp_path / "does-not-exist.yaml"
 
     runner = typer.testing.CliRunner()
     result = runner.invoke(
@@ -114,7 +117,7 @@ def test_notify_no_targets_file(tmp_path: Path) -> None:
 
 def test_notify_empty_targets_array(tmp_path: Path) -> None:
     summary = tmp_path / "summary"
-    targets = tmp_path / "deploy-targets.json"
+    targets = tmp_path / "deploy_targets.yaml"
     targets.write_text("[]")
 
     runner = typer.testing.CliRunner()
@@ -133,7 +136,7 @@ def test_notify_empty_targets_array(tmp_path: Path) -> None:
 
 def test_notify_two_targets_succeed(tmp_path: Path, rsa_private_key: str) -> None:
     summary = tmp_path / "summary"
-    targets = tmp_path / "deploy-targets.json"
+    targets = tmp_path / "deploy_targets.yaml"
     _write_targets(
         targets,
         [
@@ -173,6 +176,38 @@ def test_notify_two_targets_succeed(tmp_path: Path, rsa_private_key: str) -> Non
     assert "other/gadgets" in summary_text
 
 
+def test_notify_json_targets_file_still_parses(
+    tmp_path: Path, rsa_private_key: str
+) -> None:
+    """YAML is a superset of JSON, so an existing JSON targets file still works."""
+    summary = tmp_path / "summary"
+    targets = tmp_path / "deploy_targets.yaml"
+    targets.write_text(
+        json.dumps(
+            [{"owner": "acme", "repo": "widgets", "event_type": "image-published"}]
+        )
+    )
+
+    env = _env(
+        tmp_path,
+        targets_path=targets,
+        summary_path=summary,
+        DISPATCH_APPS=_dispatch_apps(rsa_private_key, ["acme"]),
+    )
+
+    with respx.mock(base_url=API) as router:
+        acme_dispatch = _mock_target(router, "acme", "widgets", 12345)
+
+        runner = typer.testing.CliRunner()
+        result = runner.invoke(app, ["notify", IMAGE, TAG, DIGEST], env=env)
+
+    assert result.exit_code == 0, result.output
+    assert acme_dispatch.called
+    body = json.loads(acme_dispatch.calls.last.request.content)
+    assert body["event_type"] == "image-published"
+    assert body["client_payload"] == _expected_client_payload()
+
+
 # --- one target fails, one succeeds ------------------------------------------
 
 
@@ -180,7 +215,7 @@ def test_notify_one_missing_credentials_still_dispatches_other(
     tmp_path: Path, rsa_private_key: str
 ) -> None:
     summary = tmp_path / "summary"
-    targets = tmp_path / "deploy-targets.json"
+    targets = tmp_path / "deploy_targets.yaml"
     _write_targets(
         targets,
         [
@@ -219,7 +254,7 @@ def test_notify_dry_run_makes_no_http_calls(
     tmp_path: Path, rsa_private_key: str
 ) -> None:
     summary = tmp_path / "summary"
-    targets = tmp_path / "deploy-targets.json"
+    targets = tmp_path / "deploy_targets.yaml"
     _write_targets(
         targets,
         [
@@ -251,10 +286,10 @@ def test_notify_dry_run_makes_no_http_calls(
 # --- invalid targets ---------------------------------------------------------
 
 
-def test_notify_malformed_json_exits_nonzero(tmp_path: Path) -> None:
+def test_notify_malformed_yaml_exits_nonzero(tmp_path: Path) -> None:
     summary = tmp_path / "summary"
-    targets = tmp_path / "deploy-targets.json"
-    targets.write_text("{ not valid json")
+    targets = tmp_path / "deploy_targets.yaml"
+    targets.write_text("{ not valid yaml")
 
     runner = typer.testing.CliRunner()
     result = runner.invoke(
@@ -270,7 +305,7 @@ def test_notify_malformed_json_exits_nonzero(tmp_path: Path) -> None:
 
 def test_notify_schema_mismatch_exits_nonzero(tmp_path: Path) -> None:
     summary = tmp_path / "summary"
-    targets = tmp_path / "deploy-targets.json"
+    targets = tmp_path / "deploy_targets.yaml"
     # Missing the required "repo" field.
     targets.write_text(json.dumps([{"owner": "acme"}]))
 

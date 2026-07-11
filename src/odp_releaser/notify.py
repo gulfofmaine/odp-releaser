@@ -2,7 +2,7 @@
 
 Runs as a step in a source repo's GitHub Actions workflow after an image has
 been published. It builds the same :class:`ClientPayload` that ``make-payload``
-produces, reads the deploy targets from ``.github/deploy-targets.json``, and
+produces, reads the deploy targets from ``.github/deploy_targets.yaml``, and
 dispatches the payload to each target via
 :func:`odp_releaser.github.send_dispatch`.
 
@@ -21,9 +21,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
+import ruamel.yaml
 import typer
 from githubkit.exception import RequestFailed
 from pydantic import TypeAdapter, ValidationError
+from ruamel.yaml.error import YAMLError
 
 from odp_releaser.cli_options import (
     GitHubActor,
@@ -54,7 +56,7 @@ TargetsPath = Annotated[
     Path,
     typer.Option(
         envvar="DEPLOY_TARGETS_PATH",
-        help="Path to the deploy targets JSON file",
+        help="Path to the deploy targets YAML file",
     ),
 ]
 DryRun = Annotated[
@@ -73,7 +75,7 @@ class InvalidDeployTargetsError(Exception):
         self.targets_path = targets_path
         super().__init__(
             f"{targets_path} is not a valid deploy-targets file "
-            f"(expected a JSON array of {{owner, repo, event_type}}): {detail}"
+            f"(expected a YAML array of {{owner, repo, event_type}}): {detail}"
         )
 
 
@@ -89,9 +91,10 @@ class TargetResult:
 def load_targets(targets_path: Path) -> list[DeployTarget]:
     """Load and validate deploy targets from ``targets_path``.
 
-    Returns an empty list when the file is missing, empty, or an empty JSON
-    array. Raises :class:`InvalidDeployTargetsError` when the content is not
-    valid JSON or does not match the :class:`DeployTarget` schema.
+    The file is parsed as YAML — a superset of JSON, so JSON files also load.
+    Returns an empty list when the file is missing, empty, or an empty array.
+    Raises :class:`InvalidDeployTargetsError` when the content is not valid
+    YAML or does not match the :class:`DeployTarget` schema.
     """
     if not targets_path.exists():
         return []
@@ -100,8 +103,17 @@ def load_targets(targets_path: Path) -> list[DeployTarget]:
     if not content:
         return []
 
+    yaml = ruamel.yaml.YAML(typ="safe", pure=True)
     try:
-        targets = _TARGETS_ADAPTER.validate_json(content)
+        data = yaml.load(content)
+    except YAMLError as exc:
+        raise InvalidDeployTargetsError(targets_path, str(exc)) from exc
+
+    if data is None:
+        return []
+
+    try:
+        targets = _TARGETS_ADAPTER.validate_python(data)
     except ValidationError as exc:
         raise InvalidDeployTargetsError(targets_path, str(exc)) from exc
     else:
@@ -137,7 +149,7 @@ def notify(
     image_repository: ImageRepository = None,
     github_token: GitHubToken = None,
     github_server_url: GitHubServerUrl = "https://github.com",
-    targets_path: TargetsPath = Path(".github/deploy-targets.json"),
+    targets_path: TargetsPath = Path(".github/deploy_targets.yaml"),
     *,
     dry_run: DryRun = False,
 ) -> None:

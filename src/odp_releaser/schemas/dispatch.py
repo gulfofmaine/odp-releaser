@@ -11,7 +11,7 @@ class DispatchAppCredentials(BaseModel):
 class DeployTarget(BaseModel):
     """A repository that should receive a ``repository_dispatch`` event.
 
-    Parsed from ``.github/deploy-targets.json`` by a later ``notify`` command.
+    Parsed from ``.github/deploy_targets.yaml`` by the ``notify`` command.
     """
 
     owner: str = Field(..., description="Owner of the deploy repository")
