@@ -192,14 +192,33 @@ def bump_images(
     logger.info(f"Commit message: \n{'\n'.join(commit_message)}")
 
     sanitized_image_name = payload.image_name.replace("/", "-")
+    pr_title, pr_body = _pr_title_and_body(commit_message)
     write_github_output(
         {
             "changed": "true" if changed else "false",
             "update_mode": update_mode,
             "branch_name": f"odp-releaser/bump-{sanitized_image_name}",
             "commit_message": "\n".join(commit_message),
+            "pr_title": pr_title,
+            "pr_body": pr_body,
         }
     )
+
+
+def _pr_title_and_body(commit_message: list[str]) -> tuple[str, str]:
+    """Derive a self-contained PR title/body pair from ``commit_message``.
+
+    ``commit_message`` is always ``[title, "", "Triggered by ...", "", *body]``
+    (see the assembly above), so the title is the first line and the body is
+    everything after the blank separator line, with a trailing footer added so
+    the PR body stands on its own without any workflow-side templating.
+    """
+    title = commit_message[0]
+    body_lines = list(commit_message[2:])
+    while body_lines and body_lines[-1] == "":
+        body_lines.pop()
+    body_lines.extend(["", "Automated image bump by odp-releaser."])
+    return title, "\n".join(body_lines)
 
 
 if __name__ == "__main__":

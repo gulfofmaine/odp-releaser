@@ -128,11 +128,8 @@ jobs:
           token: ${{ steps.app-token.outputs.token || github.token }}
           branch: ${{ steps.bump.outputs.branch_name }}
           commit-message: ${{ steps.bump.outputs.commit_message }}
-          title: Bump ${{ github.event.client_payload.image_name }} image
-          body: |
-            Automated image bump by odp-releaser.
-
-            Triggered from ${{ github.event.client_payload.source.url }}
+          title: ${{ steps.bump.outputs.pr_title }}
+          body: ${{ steps.bump.outputs.pr_body }}
           committer: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
           author: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
           delete-branch: true

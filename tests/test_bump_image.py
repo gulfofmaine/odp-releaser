@@ -70,6 +70,16 @@ def test_success_path_writes_github_output(
     )
     assert "Triggered by" in outputs["commit_message"]
 
+    assert outputs["pr_title"] == outputs["commit_message"].splitlines()[0]
+    assert outputs["pr_title"].startswith(
+        "Update image gmri/neracoos-mariners-dashboard to"
+    )
+    pr_body_lines = outputs["pr_body"].splitlines()
+    assert pr_body_lines[0] != ""
+    assert "Triggered by" in outputs["pr_body"]
+    assert str(client_payload.source.url) in outputs["pr_body"]
+    assert outputs["pr_body"].endswith("Automated image bump by odp-releaser.")
+
 
 def test_dagster_helm_and_kustomize_dry_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -97,6 +107,12 @@ def test_dagster_helm_and_kustomize_dry_run(
     new_tag = client_payload.new_tag()
     assert f"newTag to {new_tag}" in commit_message
     assert f"image/tag to {new_tag}" in commit_message
+
+    pr_body = outputs["pr_body"]
+    assert not pr_body.startswith("\n")
+    assert "Updated kustomize manifest" in pr_body
+    assert "Updated helm values" in pr_body
+    assert pr_body.endswith("Automated image bump by odp-releaser.")
 
 
 def test_no_config_for_image_reports_unchanged(
