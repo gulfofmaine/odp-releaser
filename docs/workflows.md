@@ -13,38 +13,32 @@ and both install the `odp-releaser` CLI to do the actual work.
 
 ## End-to-end flow
 
-```text
-SOURCE repo                                    DEPLOY repo
-────────────                                   ───────────
-build + push image to GHCR
-  │
-  ▼
-notify.yml (workflow_call)
-  odp-releaser notify
-    - builds the client_payload
-    - reads .github/deploy_targets.yaml
-    - for each target: resolves that org's
-      dispatch app creds, mints a token
-      scoped to that one repo, and sends
-      repository_dispatch
-                                                on: repository_dispatch
-                                                  [image-published]
-                                                  │
-                                                  ▼
-                                                bump-images.yml (workflow_call)
-                                                  odp-releaser bump-images
-                                                    - matches image_name against
-                                                      .github/image_manifest.yaml
-                                                    - edits Kustomize/Helm/file
-                                                      manifests
-                                                  │
-                                                  ▼
-                                                commit to main  OR  open a PR
-                                                (per update_mode)
-                                                  │
-                                                  ▼
-                                                ArgoCD (or similar) syncs the
-                                                new manifests to the cluster
+```mermaid
+sequenceDiagram
+    participant Source as Source Repo
+    participant Notify as notify.yml
+    participant App as Dispatch GitHub App
+    participant Deploy as Deploy repo
+    participant Argo as ArgoCD
+
+    Source->>Source: build + push image to GHCR
+    Source->>Notify: workflow_call (notify)
+    Notify->>Notify: build client_payload
+    Notify->>Notify: read .github/deploy_targets.yaml
+    loop for each target
+        Notify->>App: request installation token (repo-scoped)
+        App-->>Notify: token
+        Notify->>Deploy: repository_dispatch [image-published]
+    end
+    Deploy->>Deploy: bump-images.yml matches image against image_manifest.yaml
+    Deploy->>Deploy: edit Kustomize/Helm/file manifests
+    alt update_mode: commit
+        Deploy->>Deploy: commit directly to main
+    else update_mode: pr
+        Deploy->>Deploy: open a pull request
+    end
+    Deploy->>Argo: new manifests available
+    Argo->>Argo: sync manifests to the cluster
 ```
 
 Everything below documents the two jobs in that diagram. The GitHub App

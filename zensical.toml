@@ -94,6 +94,10 @@ name = "bash"
 class = "bash"
 validator = "markdown_exec.validator"
 format = "markdown_exec.formatter"
+[[project.markdown_extensions.pymdownx.superfences.custom_fences]]
+name = "mermaid"
+class = "mermaid"
+format = "pymdownx.superfences.fence_code_format"
 
 [project.markdown_extensions."mkdocs_typer2.markdown:makeExtension"]
 pretty = false

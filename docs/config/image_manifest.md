@@ -53,9 +53,9 @@ The values are templated with parts of the [client payload](../client_payload.md
 ##### Example values
 
 ```python exec="on"
-from odp_releaser.bump_image_tester import load_client_payload
+from odp_releaser.bump_image_tester import EventType, load_client_payload
 
-payload = load_client_payload("push")
+payload = load_client_payload(EventType.push)
 for key, value in payload.value_format_kwargs().items():
     if isinstance(value, str):
         print(f"- `{key}` - `{value}`")
