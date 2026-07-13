@@ -183,7 +183,8 @@ def notify(
     With ``--dry-run`` credentials are resolved for each target but no tokens
     are minted and no dispatch events are sent.
     """
-    payload = resolve_client_payload(  # pylint: disable=duplicate-code
+    # pylint: disable=duplicate-code
+    payload = resolve_client_payload(
         image_name=image_name,
         tag=tag,
         digest=digest,
@@ -198,6 +199,7 @@ def notify(
         github_token=github_token,
         github_server_url=github_server_url,
     )
+    # pylint: enable=duplicate-code
     logger.debug("Client payload: %s", payload.model_dump_json())
 
     try:

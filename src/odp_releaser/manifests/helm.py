@@ -38,14 +38,13 @@ def update_helm_values_with_payload(
     processor = open_for_editing(values_text)
     logger.debug(f"Original values for {values_path}: {processor.data}")
 
-    commit_message.append(f"- Updated helm values at {values_path}")
-
     apply_set_templates(processor, manifest.set, payload, commit_message)
 
     if manifest.dagster_user_code:
         tag_path = f'/deployments[image.repository="{payload.image_name}"]/image/tag'
         matches = list(processor.get_nodes(tag_path, mustexist=False))
         if matches:
+            commit_message.append(f"- Updated helm values at {values_path}")
             message = set_value(
                 processor,
                 tag_path,

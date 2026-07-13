@@ -69,11 +69,15 @@ on:
         default: 1
     secrets:
       dispatch_app_id:
-        description: App ID of the GitHub App used to dispatch to deploy repos.
-        required: true
+        description:
+          App ID of the GitHub App used to dispatch to deploy repos. Required if
+          dispatch_app_id is not provided.
+        required: false
       dispatch_app_private_key:
-        description: Private key of the dispatch GitHub App.
-        required: true
+        description:
+          Private key of the dispatch GitHub App. Required if dispatch_app_id is
+          not provided.
+        required: false
       dispatch_apps:
         description: >-
           Optional JSON object mapping owner -> {app_id, private_key} for
@@ -97,7 +101,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v8.3.0
+        uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
         with:
           enable-cache: false
 
