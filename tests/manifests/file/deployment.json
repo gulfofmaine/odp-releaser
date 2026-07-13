@@ -1,0 +1,22 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "example",
+    "annotations": {
+      "gmri.org/digest": "sha256:old"
+    }
+  },
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "app",
+            "image": "gmri/example:old"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+images:
+  gmri/neracoos-mariners-dashboard:
+    # Production
+    - events:
+        - release
+      kustomize_manifests:
+        - path: ./kustomization.yaml
+          set:
+            '/resources[.^"github.com/gulfofmaine/Neracoos-1-Buoy-App/k8s?ref="]': "github.com/gulfofmaine/Neracoos-1-Buoy-App/k8s?ref={new_tag}"
+
+    # Dev
+    - events:
+        - push
+      kustomize_manifests:
+        - path: ./kustomization.yaml
+          set:
+            '/resources[.^"github.com/gulfofmaine/Neracoos-1-Buoy-App/k8s?ref="]': "github.com/gulfofmaine/Neracoos-1-Buoy-App/k8s?ref={sha}"

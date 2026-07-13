@@ -1,0 +1,129 @@
+# Reusable workflow: notify deploy targets of a newly published image.
+#
+# This workflow is meant to be called cross-repo by an image-building repo
+# after it has pushed a container image. It runs the `odp-releaser notify`
+# CLI, which reads the calling repo's deploy-targets file and dispatches
+# repository_dispatch events (via a GitHub App) to each configured deploy
+# repository so they can bump the image to the new tag/digest.
+#
+# Minimal caller example:
+#
+#   jobs:
+#     notify:
+#       uses: gulfofmaine/odp-releaser/.github/workflows/notify.yml@<ref>
+#       with:
+#         image_name: my-service
+#         tag: ${{ github.ref_name }}
+#         digest: ${{ steps.build.outputs.digest }}
+#         # image_repository: ghcr.io/gulfofmaine/my-service  # optional
+#         # environment: production                           # optional gate
+#         # deploy_targets_path: .github/deploy_targets.yaml  # optional
+#         # verbosity: 1                                       # optional, default
+#       secrets:
+#         dispatch_app_id: ${{ secrets.DISPATCH_APP_ID }}
+#         dispatch_app_private_key: ${{ secrets.DISPATCH_APP_PRIVATE_KEY }}
+#         # dispatch_apps: ${{ secrets.DISPATCH_APPS }}        # optional multi-org
+
+name: Notify deploy targets
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        description: Name of the image that was published.
+        required: true
+        type: string
+      tag:
+        description: Tag the image was published under.
+        required: true
+        type: string
+      digest:
+        description: Digest (sha256:...) of the published image.
+        required: true
+        type: string
+      image_repository:
+        description: >-
+          Optional image repository (e.g. ghcr.io/owner/name). Defaults to
+          ghcr.io/<owner> when left empty.
+        required: false
+        type: string
+        default: ""
+      environment:
+        description: >-
+          Optional GitHub environment used to gate the dispatch behind
+          protection rules. Leave empty for no gating.
+        required: false
+        type: string
+        default: ""
+      deploy_targets_path:
+        description: Path to the deploy-targets YAML file in the calling repo.
+        required: false
+        type: string
+        default: .github/deploy_targets.yaml
+      verbosity:
+        description: >-
+          CLI verbosity: 0=warning, 1=info (default), 2 or more=debug. Maps to
+          the CLI's -v/-vv/-vvv flags (capped at 3).
+        required: false
+        type: number
+        default: 1
+    secrets:
+      dispatch_app_id:
+        description:
+          App ID of the GitHub App used to dispatch to deploy repos. Required if
+          dispatch_app_id is not provided.
+        required: false
+      dispatch_app_private_key:
+        description:
+          Private key of the dispatch GitHub App. Required if dispatch_app_id is
+          not provided.
+        required: false
+      dispatch_apps:
+        description: >-
+          Optional JSON object mapping owner -> {app_id, private_key} for
+          dispatching across multiple organizations.
+        required: false
+
+permissions: {}
+
+jobs:
+  notify:
+    name: Notify deploy targets
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      pull-requests: read # odp-releaser reads PR metadata for the dispatch payload
+    steps:
+      - name: Checkout calling repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+        with:
+          enable-cache: false
+
+      - name: Notify deploy targets
+        env:
+          IMAGE_NAME: ${{ inputs.image_name }}
+          TAG: ${{ inputs.tag }}
+          DIGEST: ${{ inputs.digest }}
+          IMAGE_REPOSITORY: ${{ inputs.image_repository }}
+          DEPLOY_TARGETS_PATH: ${{ inputs.deploy_targets_path }}
+          GITHUB_TOKEN: ${{ github.token }}
+          DISPATCH_APP_ID: ${{ secrets.dispatch_app_id }}
+          DISPATCH_APP_PRIVATE_KEY: ${{ secrets.dispatch_app_private_key }}
+          DISPATCH_APPS: ${{ secrets.dispatch_apps }}
+          ODP_RELEASER_REF: ${{ github.job_workflow_sha }}
+          VERBOSITY: ${{ inputs.verbosity }}
+        run: |
+          case "$VERBOSITY" in
+            0) FLAGS=() ;;
+            1) FLAGS=(-v) ;;
+            2) FLAGS=(-vv) ;;
+            *) FLAGS=(-vvv) ;;
+          esac
+          uvx --from "git+https://github.com/gulfofmaine/odp-releaser@${ODP_RELEASER_REF}" \
+            odp-releaser "${FLAGS[@]}" notify "$IMAGE_NAME" "$TAG" "$DIGEST"

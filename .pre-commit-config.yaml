@@ -1,0 +1,114 @@
+ci:
+  autoupdate_commit_msg: "chore(deps): update pre-commit hooks"
+  autofix_commit_msg: "style: pre-commit fixes"
+  autoupdate_schedule: "monthly"
+
+exclude: ^.cruft.json|.copier-answers.yml$
+
+repos:
+  - repo: https://github.com/adamchainz/blacken-docs
+    rev: "fda77690955e9b63c6687d8806bafd56a526e45f" # frozen: 1.20.0
+    hooks:
+      - id: blacken-docs
+        additional_dependencies: [black==26.*]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: "3e8a8703264a2f4a69428a0aa4dcb512790b2c8c" # frozen: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+      - id: debug-statements
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: name-tests-test
+        args: ["--pytest-test-first"]
+      - id: requirements-txt-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: "3a6eb0fadf60b3cccfd80bad9dbb6fae7e47b316" # frozen: v1.10.0
+    hooks:
+      - id: rst-backticks
+      - id: rst-directive-colons
+      - id: rst-inline-touching-normal
+
+  - repo: https://github.com/rbubley/mirrors-prettier
+    rev: "39e2973981e6d2f9b6c543b0086a2d2393abdc89" # frozen: v3.9.4
+    hooks:
+      - id: prettier
+        types_or: [yaml, markdown, html, css, scss, javascript, json]
+        args: [--prose-wrap=always]
+        # mkdocstrings/mkdocs-typer2 `:::` directives rely on indented
+        # continuation lines that prettier folds into a single paragraph
+        exclude: ^docs/.*\.md$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: "c59bba8fb259db0fec2bbb77ad8ba51ea7341b56" # frozen: v0.15.20
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: "d2823d321df3af8f878f7ee3414dc94d037145b9" # frozen: v2.1.0
+    hooks:
+      - id: mypy
+        files: src|tests|noxfile.py
+        args: []
+        additional_dependencies:
+          - nox
+          - pytest
+          - cryptography
+          - githubkit
+          - inline-snapshot
+          - pydantic
+          - respx
+          - typer
+          - rich
+          - ruamel.yaml
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: "2ccb47ff45ad361a21071a7eedda4c37e6ae8c5a" # frozen: v2.4.2
+    hooks:
+      - id: codespell
+        additional_dependencies:
+          - tomli; python_version<'3.11'
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: "745eface02aef23e168a8afb6b5737818efbea95" # frozen: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  - repo: local
+    hooks:
+      - id: disallow-caps
+        name: Disallow improper capitalization
+        language: pygrep
+        entry: PyBind|Numpy|Cmake|CCache|Github|PyTest
+        # tests/event_data and its inline snapshots contain verbatim captured
+        # GitHub event payloads whose text can't be edited (e.g. the real PR
+        # title "Dump Github Actions events")
+        exclude: .pre-commit-config.yaml|tests/event_data/|tests/test_github_context.py|tests/test_make_payload.py
+
+  - repo: https://github.com/abravalheri/validate-pyproject
+    rev: "4b2e70d08cb2ccd26d1fba73588de41c7a5d50b7" # frozen: v0.25
+    hooks:
+      - id: validate-pyproject
+        additional_dependencies: ["validate-pyproject-schema-store[all]"]
+
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: "6b63472e72e1a91ed8a2f6d483790dfb644fa1d3" # frozen: 0.37.4
+    hooks:
+      - id: check-dependabot
+      - id: check-github-workflows
+      - id: check-readthedocs
+
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: "e3eebf65325ccc992422292cb7a4baee967cf815" # frozen: v1.26.1
+    hooks:
+      - id: zizmor
+        files: "^\\.github"
+        args: [--persona=pedantic]

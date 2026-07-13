@@ -1,0 +1,13 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: 2026.06.18-12-g272a70d
+_src_path: gh:scientific-python/cookie
+backend: uv
+docs: zensical
+email: akerney@gmri.org
+full_name: Alex Kerney
+license: Apache
+org: gulfofmaine
+project_name: odp-releaser
+project_short_description: Tooling to help manage releasing Docker images across repos
+url: https://github.com/gulfofmaine/odp-releaser
+vcs: true

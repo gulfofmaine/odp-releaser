@@ -1,0 +1,153 @@
+# Reusable workflow: bump image references in a deploy repo.
+#
+# This workflow is meant to be called by a deploy repo in response to a
+# repository_dispatch event sent by `odp-releaser notify`. It runs the
+# `odp-releaser bump-images` CLI, which reads the incoming client_payload
+# and this repo's image manifest, then either commits the bump directly or
+# opens a pull request with the updated image references.
+#
+# When the deploy org's own dispatch-app credentials are supplied (via the
+# ci_app_id / ci_app_private_key secrets), the commit/PR is authored with an
+# app-minted token so the resulting change triggers this repo's own CI.
+# Pushes/PRs authored with the default GITHUB_TOKEN do not trigger further
+# workflow runs by GitHub Actions design.
+#
+# Minimal caller example:
+#
+#   on:
+#     repository_dispatch:
+#       types: [image-published]
+#
+#   jobs:
+#     bump:
+#       uses: gulfofmaine/odp-releaser/.github/workflows/bump-images.yml@<ref>
+#       with:
+#         # config_path: .github/image_manifest.yaml            # optional
+#         # git_user_name: odp-releaser[bot]                    # optional
+#         # git_user_email: odp-releaser[bot]@users.noreply.github.com
+#         # verbosity: 1                                       # optional, default
+#       secrets:
+#         ci_app_id: ${{ secrets.CI_APP_ID }}                   # optional
+#         ci_app_private_key: ${{ secrets.CI_APP_PRIVATE_KEY }} # optional
+
+name: Bump images
+
+on:
+  workflow_call:
+    inputs:
+      config_path:
+        description: Path to the image manifest config file.
+        required: false
+        type: string
+        default: .github/image_manifest.yaml
+      git_user_name:
+        description: Git author/committer name for direct commits.
+        required: false
+        type: string
+        default: odp-releaser[bot]
+      git_user_email:
+        description: Git author/committer email for direct commits.
+        required: false
+        type: string
+        default: odp-releaser[bot]@users.noreply.github.com
+      verbosity:
+        description: >-
+          CLI verbosity: 0=warning, 1=info (default), 2 or more=debug. Maps to
+          the CLI's -v/-vv/-vvv flags (capped at 3).
+        required: false
+        type: number
+        default: 1
+    secrets:
+      ci_app_id:
+        description: >-
+          Optional App ID of this repo's GitHub App. When set, the commit/PR is
+          authored with an app token so it triggers this repo's own CI.
+        required: false
+      ci_app_private_key:
+        description: Optional private key matching ci_app_id.
+        required: false
+
+permissions: {}
+
+jobs:
+  bump:
+    name: Bump ${{ github.event.client_payload.image_name }} image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commit the bump directly or push a PR branch
+      pull-requests: write # open the bump pull request
+    env:
+      HAS_CI_APP: ${{ secrets.ci_app_id != '' }}
+    concurrency:
+      group: odp-releaser-${{ github.event.client_payload.image_name }}
+      cancel-in-progress: false
+    steps:
+      - name: Generate app token
+        id: app-token
+        if: env.HAS_CI_APP == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ci_app_id }}
+          private-key: ${{ secrets.ci_app_private_key }}
+          # Scope the app token to only what the bump commit/PR needs.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout repository
+        # persist-credentials stays true so the "Commit bump" step can git push.
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0 # zizmor: ignore[artipacked]
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          persist-credentials: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+        with:
+          enable-cache: false
+
+      - name: Bump images
+        id: bump
+        env:
+          IMAGE_MANIFEST_CONFIG_PATH: ${{ inputs.config_path }}
+          CLIENT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          ODP_RELEASER_REF: ${{ github.job_workflow_sha }}
+          VERBOSITY: ${{ inputs.verbosity }}
+        run: |
+          case "$VERBOSITY" in
+            0) FLAGS=() ;;
+            1) FLAGS=(-v) ;;
+            2) FLAGS=(-vv) ;;
+            *) FLAGS=(-vvv) ;;
+          esac
+          uvx --from "git+https://github.com/gulfofmaine/odp-releaser@${ODP_RELEASER_REF}" \
+            odp-releaser "${FLAGS[@]}" bump-images
+
+      - name: Commit bump
+        if:
+          steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
+          == 'commit'
+        env:
+          GIT_USER_NAME: ${{ inputs.git_user_name }}
+          GIT_USER_EMAIL: ${{ inputs.git_user_email }}
+          COMMIT_MESSAGE: ${{ steps.bump.outputs.commit_message }}
+        run: |
+          git config user.name "$GIT_USER_NAME"
+          git config user.email "$GIT_USER_EMAIL"
+          git add -A
+          git commit -m "$COMMIT_MESSAGE"
+          git push
+
+      - name: Open bump pull request
+        if:
+          steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
+          == 'pull_request'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1 # zizmor: ignore[superfluous-actions]
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          branch: ${{ steps.bump.outputs.branch_name }}
+          commit-message: ${{ steps.bump.outputs.commit_message }}
+          title: ${{ steps.bump.outputs.pr_title }}
+          body: ${{ steps.bump.outputs.pr_body }}
+          committer: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
+          author: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
+          delete-branch: true
