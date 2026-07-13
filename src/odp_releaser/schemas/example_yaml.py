@@ -49,7 +49,10 @@ def _bare_string(model: BaseModel) -> str | None:
             continue
         if getattr(model, name) != _field_default(field):
             return None
-    return str(getattr(model, shorthand_field))
+    value = getattr(model, shorthand_field)
+    if isinstance(value, Path):
+        return value.as_posix()
+    return str(value)
 
 
 def _is_empty(value: object) -> bool:
@@ -83,7 +86,7 @@ def _to_yaml(value: object, key_indent: int, seen: _SeenComments) -> object:
             seq.append(_to_yaml(item, key_indent, seen))
         return seq
     if isinstance(value, Path):
-        return str(value)
+        return value.as_posix()
     return value
 
 
