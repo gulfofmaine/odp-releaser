@@ -101,7 +101,7 @@ def bump_images(
     logger.debug(payload)
 
     logger.debug("Raw config:")
-    raw_config = config_path.read_text()
+    raw_config = config_path.read_text()  # pylint: disable=unspecified-encoding
     logger.debug(raw_config)
 
     yaml = ruamel.yaml.YAML(typ="safe", pure=True)

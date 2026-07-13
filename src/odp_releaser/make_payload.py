@@ -224,6 +224,7 @@ def make_payload(
     into a ``gh api ... /dispatches`` call. All other logging goes to
     stderr.
     """
+    # pylint: disable=duplicate-code
     payload = resolve_client_payload(
         image_name=image_name,
         tag=tag,
@@ -239,6 +240,7 @@ def make_payload(
         github_token=github_token,
         github_server_url=github_server_url,
     )
+    # pylint: enable=duplicate-code
 
     typer.echo(payload.model_dump_json())
 

@@ -18,9 +18,9 @@ CLIENT_PAYLOAD_DIR = Path(__file__).parent / "client_payload"
 class EventType(StrEnum):
     """Canned ``client_payload`` events available under ``client_payload/``."""
 
-    push = "push"
-    release = "release"
-    workflow_dispatch = "workflow_dispatch"
+    push = "push"  # pylint: disable=invalid-name
+    release = "release"  # pylint: disable=invalid-name
+    workflow_dispatch = "workflow_dispatch"  # pylint: disable=invalid-name
 
 
 def test_bump_images(

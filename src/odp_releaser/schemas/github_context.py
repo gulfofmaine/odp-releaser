@@ -85,6 +85,8 @@ class WorkflowDispatchEvent(BaseModel):
 
 
 class GitHubContext(BaseModel):
+    """Subset of the GitHub context available in actions events."""
+
     model_config = ConfigDict(extra="ignore")
 
     ref: Annotated[str, Field(description="Branch or tag name")]

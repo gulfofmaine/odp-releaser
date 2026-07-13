@@ -136,8 +136,7 @@ def load_targets(targets_path: Path) -> list[DeployTarget]:
         targets = _TARGETS_ADAPTER.validate_python(data)
     except ValidationError as exc:
         raise InvalidDeployTargetsError(targets_path, str(exc)) from exc
-    else:
-        return targets
+    return targets
 
 
 def _summary_table(results: list[TargetResult]) -> str:
@@ -184,7 +183,7 @@ def notify(
     With ``--dry-run`` credentials are resolved for each target but no tokens
     are minted and no dispatch events are sent.
     """
-    payload = resolve_client_payload(
+    payload = resolve_client_payload(  # pylint: disable=duplicate-code
         image_name=image_name,
         tag=tag,
         digest=digest,
