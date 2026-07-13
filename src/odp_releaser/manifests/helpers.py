@@ -1,4 +1,5 @@
-from tempfile import NamedTemporaryFile
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from yamlpath import Processor
 from yamlpath.common import Parsers
@@ -17,10 +18,15 @@ class ManifestLoadError(Exception):
 
 
 def open_for_editing(manifest_text: str) -> Processor:
-    with NamedTemporaryFile(mode="w+", encoding="utf-8") as f:
-        f.write(manifest_text)
-        f.seek(0)
-        yaml_data, doc_loaded = Parsers.get_yaml_data(yaml, yamlpath_logger, f.name)
+    with TemporaryDirectory() as temp_dir:
+        tmp_file = Path(f"{temp_dir}/manifest.yaml")
+
+        with tmp_file.open("w", encoding="utf-8") as f:
+            f.write(manifest_text)
+
+        yaml_data, doc_loaded = Parsers.get_yaml_data(
+            yaml, yamlpath_logger, str(tmp_file)
+        )
 
     if not doc_loaded:
         msg = "Unable to load manifest YAML"

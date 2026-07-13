@@ -178,6 +178,7 @@ messages_control.disable = [
   "missing-module-docstring",
   "missing-function-docstring",
   "wrong-import-position",
+  "logging-fstring-interpolation",
 ]
 
 [tool.uv]
