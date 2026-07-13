@@ -272,3 +272,57 @@ def test_test_bump_images_prompts_for_missing_values(tmp_path: Path) -> None:
     assert "gmri/neracoos-mariners-dashboard" in result.output
     outputs = _parse_github_output(output.read_text())
     assert outputs["changed"] == "true"
+
+
+def test_bump_images_payload_positional_arg(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "bump-images",
+            client_payload.model_dump_json(),
+            "--config-path",
+            str(MANIFESTS_DIR / "push" / "image_manifest.yaml"),
+            "--dry-run",
+        ],
+        env={"GITHUB_OUTPUT": str(output)},
+    )
+
+    assert result.exit_code == 0, result.output
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "true"
+
+
+def test_bump_images_env_only_invocation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["bump-images", "--dry-run"],
+        env={
+            "GITHUB_OUTPUT": str(output),
+            "CLIENT_PAYLOAD": client_payload.model_dump_json(),
+            "IMAGE_MANIFEST_CONFIG_PATH": str(
+                MANIFESTS_DIR / "push" / "image_manifest.yaml"
+            ),
+        },
+    )
+
+    assert result.exit_code == 0, result.output
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "true"

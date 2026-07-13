@@ -67,19 +67,6 @@ def _apply_manifest[ManifestT: _HasPath](
 
 
 def bump_images(
-    config_path: Annotated[
-        Path,
-        typer.Argument(
-            envvar="IMAGE_MANIFEST_CONFIG_PATH",
-            help=(
-                "Path to the image manifest configuration file. Paths inside "
-                "the config (manifest paths) are resolved relative to this "
-                "file's parent directory. Can be loaded from env: "
-                "`IMAGE_MANIFEST_CONFIG_PATH`"
-            ),
-        ),
-    ] = DEFAULT_CONFIG_PATH,
-    *,
     client_payload: Annotated[
         str,
         typer.Argument(
@@ -87,6 +74,18 @@ def bump_images(
             help="repository_dispatch client_payload string, can be loaded from env: `CLIENT_PAYLOAD`",
         ),
     ],
+    *,
+    config_path: Annotated[
+        Path,
+        typer.Option(
+            envvar="IMAGE_MANIFEST_CONFIG_PATH",
+            help=(
+                "Path to the image manifest configuration file. Paths inside "
+                "the config (manifest paths) are resolved relative to this "
+                "file's parent directory."
+            ),
+        ),
+    ] = DEFAULT_CONFIG_PATH,
     dry_run: Annotated[
         bool, typer.Option(help="Template the changes, but don't write them")
     ] = False,
