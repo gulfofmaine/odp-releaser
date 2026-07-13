@@ -80,6 +80,8 @@ on:
           dispatching across multiple organizations.
         required: false
 
+permissions: {}
+
 jobs:
   notify:
     name: Notify deploy targets
@@ -87,10 +89,10 @@ jobs:
     environment: ${{ inputs.environment }}
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: read # odp-releaser reads PR metadata for the dispatch payload
     steps:
       - name: Checkout calling repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 

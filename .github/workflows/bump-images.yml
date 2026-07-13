@@ -67,13 +67,15 @@ on:
         description: Optional private key matching ci_app_id.
         required: false
 
+permissions: {}
+
 jobs:
   bump:
     name: Bump ${{ github.event.client_payload.image_name }} image
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: write # commit the bump directly or push a PR branch
+      pull-requests: write # open the bump pull request
     env:
       HAS_CI_APP: ${{ secrets.ci_app_id != '' }}
     concurrency:
@@ -83,7 +85,7 @@ jobs:
       - name: Generate app token
         id: app-token
         if: env.HAS_CI_APP == 'true'
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.ci_app_id }}
           private-key: ${{ secrets.ci_app_private_key }}
@@ -93,9 +95,10 @@ jobs:
 
       - name: Checkout repository
         # persist-credentials stays true so the "Commit bump" step can git push.
-        uses: actions/checkout@v7 # zizmor: ignore[artipacked]
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0 # zizmor: ignore[artipacked]
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
+          persist-credentials: true
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v8.3.0
@@ -138,7 +141,7 @@ jobs:
         if:
           steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
           == 'pull_request'
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1 # zizmor: ignore[superfluous-actions]
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
           branch: ${{ steps.bump.outputs.branch_name }}
