@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 
+import pytest
+from yamlpath.common import Parsers
+
 from odp_releaser.manifests.file import update_file_with_payload
+from odp_releaser.manifests.helpers import ManifestLoadError, open_for_editing
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import FileManifest
 
@@ -82,3 +87,17 @@ def test_json_file_manifest_stays_valid_json_with_stable_formatting() -> None:
     # Stable 2-space indentation and a trailing newline.
     assert result.endswith("\n")
     assert '\n  "apiVersion": "apps/v1"' in result
+
+
+def test_open_for_editing_raises_on_invalid_yaml() -> None:
+    with pytest.raises(ManifestLoadError):
+        open_for_editing(": invalid: {unclosed")
+
+
+def test_open_for_editing_preserves_comment() -> None:
+    yaml_editor = Parsers.get_yaml_editor(explicit_start=False)
+    processor = open_for_editing("# my comment\nkey: value\n")
+    buf = io.StringIO()
+    yaml_editor.dump(processor.data, buf)
+    result = buf.getvalue()
+    assert "# my comment" in result

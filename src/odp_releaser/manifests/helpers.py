@@ -1,6 +1,3 @@
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
 from yamlpath import Processor
 from yamlpath.common import Parsers
 from yamlpath.enums import YAMLValueFormats
@@ -18,20 +15,12 @@ class ManifestLoadError(Exception):
 
 
 def open_for_editing(manifest_text: str) -> Processor:
-    with TemporaryDirectory() as temp_dir:
-        tmp_file = Path(f"{temp_dir}/manifest.yaml")
-
-        with tmp_file.open("w", encoding="utf-8") as f:
-            f.write(manifest_text)
-
-        yaml_data, doc_loaded = Parsers.get_yaml_data(
-            yaml, yamlpath_logger, str(tmp_file)
-        )
-
+    yaml_data, doc_loaded = Parsers.get_yaml_data(
+        yaml, yamlpath_logger, manifest_text, literal=True
+    )
     if not doc_loaded:
         msg = "Unable to load manifest YAML"
         raise ManifestLoadError(msg)
-
     return Processor(yamlpath_logger, yaml_data)
 
 
