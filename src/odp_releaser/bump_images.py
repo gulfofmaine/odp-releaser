@@ -32,7 +32,10 @@ def _apply_manifest[ManifestT: _HasPath](
 ) -> bool:
     """Resolve, update, diff and (unless ``dry_run``) write a single manifest.
 
-    Returns ``True`` when the update changed the manifest's contents.
+    Returns ``True`` when the update changed the manifest's contents. The
+    update's commit message entries are only appended to ``commit_message``
+    when the contents actually changed, so unchanged manifests don't show up
+    in the audit trail.
     """
     manifest_path = (config_path.parent / manifest.path).resolve()
     try:
@@ -42,11 +45,14 @@ def _apply_manifest[ManifestT: _HasPath](
     except ValueError:
         display_path = manifest_path
     original_manifest = manifest_path.read_text()
+    manifest_messages: list[str] = []
     updated_manifest = update_fn(
-        display_path, original_manifest, manifest, payload, commit_message
+        display_path, original_manifest, manifest, payload, manifest_messages
     )
 
     changed = updated_manifest != original_manifest
+    if changed:
+        commit_message.extend(manifest_messages)
 
     diff = difflib.unified_diff(
         original_manifest.splitlines(),

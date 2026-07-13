@@ -301,6 +301,37 @@ def test_bump_images_payload_positional_arg(
     assert outputs["changed"] == "true"
 
 
+def test_bump_images_no_change_omits_commit_message_entries(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+    # Match the fixture's current tag and sha so the update is a no-op.
+    client_payload.tag = "5763586"
+    client_payload.git_sha = "5763586f994226eb2d95b4f8b431f011fcc21f76"
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "bump-images",
+            client_payload.model_dump_json(),
+            "--config-path",
+            str(MANIFESTS_DIR / "push" / "image_manifest.yaml"),
+            "--dry-run",
+        ],
+        env={"GITHUB_OUTPUT": str(output)},
+    )
+
+    assert result.exit_code == 0, result.output
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "false"
+    assert "Updated" not in outputs["commit_message"]
+
+
 def test_bump_images_env_only_invocation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
