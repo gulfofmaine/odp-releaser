@@ -1,6 +1,9 @@
+import re
 from typing import Annotated
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
+
+_DIGEST_PATTERN = re.compile(r"^[a-z0-9]+(?:[._+-][a-z0-9]+)*:[0-9a-fA-F]{32,}$")
 
 
 class Release(BaseModel):
@@ -43,7 +46,15 @@ class ClientPayload(BaseModel):
     """repository_dispatch payload for image updates."""
 
     image_name: Annotated[str, Field(..., description="Name of the image")]
-    digest: Annotated[str, Field(..., description="Digest of the image")]
+    digest: Annotated[
+        str,
+        Field(
+            ...,
+            description=(
+                "Bare digest of the image, e.g. 'sha256:<hex>' (no repository prefix)"
+            ),
+        ),
+    ]
     tag: Annotated[str, Field(..., description="Tag of the image")]
     git_sha: Annotated[str, Field(..., description="Git SHA of the commit")]
     image_ref: Annotated[str, Field(..., description="Full reference of the image")]
@@ -51,6 +62,19 @@ class ClientPayload(BaseModel):
         ClientPayloadSource, Field(description="Source information of the payload")
     ]
     repo: Annotated[str, Field(..., description="Repository")]
+
+    @field_validator("digest", mode="after")
+    @classmethod
+    def _validate_digest(cls, value: str) -> str:
+        if not _DIGEST_PATTERN.match(value):
+            msg = (
+                f"digest must be a bare image digest like 'sha256:<hex>', got "
+                f"'{value}'. Strip any repository prefix (docker inspect "
+                "RepoDigests output is 'repo@sha256:...' — pass only the part "
+                "after '@')."
+            )
+            raise ValueError(msg)
+        return value
 
     def new_tag(self) -> str:
         if self.source.event == "release":

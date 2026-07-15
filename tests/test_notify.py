@@ -345,6 +345,30 @@ def test_notify_schema_mismatch_exits_nonzero(tmp_path: Path) -> None:
     )
 
 
+def test_notify_malformed_digest_exits_nonzero(tmp_path: Path) -> None:
+    summary = tmp_path / "summary"
+    targets = tmp_path / "deploy_targets.yaml"
+    targets.write_text("[]")
+    bad_digest = (
+        "gmri/neracoos-climatology-py-dash@sha256:"
+        "041d1a8c2ef53044d3ea25d686e92e3ba02b25e8c9dbe1aa2d0d4ef27089ed39"
+    )
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["notify", IMAGE, TAG, bad_digest],
+        env=_env(tmp_path, targets_path=targets, summary_path=summary),
+    )
+
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(
+        result.exception, (typer.Exit, SystemExit)
+    )
+    output = result.output or result.stderr
+    assert "Strip any repository prefix" in output
+
+
 # --- test-notify --------------------------------------------------------------
 
 

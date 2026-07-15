@@ -20,10 +20,10 @@ def _payload() -> ClientPayload:
     return ClientPayload.model_validate(
         {
             "image_name": IMAGE_NAME,
-            "digest": "sha256:abc123",
+            "digest": "sha256:abc123abc123abc123abc123abc123abc123",
             "tag": "7c8d9e0",
             "git_sha": "7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
-            "image_ref": f"{IMAGE_NAME}@sha256:abc123",
+            "image_ref": f"{IMAGE_NAME}@sha256:abc123abc123abc123abc123abc123abc123",
             "repo": "gulfofmaine/example",
             "source": {
                 "event": "push",
@@ -55,7 +55,7 @@ def test_yaml_file_manifest_applies_set_templates() -> None:
     )
 
     assert "image: gmri/example:7c8d9e0" in result
-    assert "gmri.org/digest: sha256:abc123" in result
+    assert "gmri.org/digest: sha256:abc123abc123abc123abc123abc123abc123" in result
 
 
 def test_json_file_manifest_stays_valid_json_with_stable_formatting() -> None:
@@ -82,7 +82,10 @@ def test_json_file_manifest_stays_valid_json_with_stable_formatting() -> None:
         parsed["spec"]["template"]["spec"]["containers"][0]["image"]
         == "gmri/example:7c8d9e0"
     )
-    assert parsed["metadata"]["annotations"]["gmri.org/digest"] == "sha256:abc123"
+    assert (
+        parsed["metadata"]["annotations"]["gmri.org/digest"]
+        == "sha256:abc123abc123abc123abc123abc123abc123"
+    )
 
     # Stable 2-space indentation and a trailing newline.
     assert result.endswith("\n")

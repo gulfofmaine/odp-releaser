@@ -86,7 +86,7 @@ above.
 | --- | --- | --- | --- |
 | `image_name` | yes | — | Name of the image that was published. |
 | `tag` | yes | — | Tag the image was published under. |
-| `digest` | yes | — | Digest (`sha256:...`) of the published image. |
+| `digest` | yes | — | Digest (`sha256:...`) of the published image. Must be a bare digest; a value still carrying a `repo@` prefix (e.g. from `docker inspect`'s `RepoDigests`) is rejected. |
 | `image_repository` | no | `ghcr.io/<owner>` | Image repository, e.g. `ghcr.io/owner/name`. |
 | `environment` | no | `""` | GitHub environment used to gate the dispatch behind protection rules. Empty means no gating. |
 | `deploy_targets_path` | no | `.github/deploy_targets.yaml` | Path to the deploy-targets file in the calling repo. |
