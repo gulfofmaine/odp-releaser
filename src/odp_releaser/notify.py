@@ -44,7 +44,6 @@ from odp_releaser.cli_options import (
     GitHubServerUrl,
     GitHubSha,
     GitHubToken,
-    ImageRepository,
 )
 from odp_releaser.github import (
     AppNotInstalledError,
@@ -165,7 +164,6 @@ def notify(
     github_run_id: GitHubRunId,
     github_ref_name: GitHubRefName,
     github_sha: GitHubSha,
-    image_repository: ImageRepository = None,
     github_token: GitHubToken = None,
     github_server_url: GitHubServerUrl = "https://github.com",
     targets_path: TargetsPath = Path(DEFAULT_TARGETS_PATH),
@@ -196,7 +194,6 @@ def notify(
             github_run_id=github_run_id,
             github_ref_name=github_ref_name,
             github_sha=github_sha,
-            image_repository=image_repository,
             github_token=github_token,
             github_server_url=github_server_url,
         )
@@ -223,6 +220,8 @@ def notify(
         return
 
     client_payload = payload.model_dump(mode="json")
+
+    logger.debug("Deploy targets: %s", targets)
 
     results: list[TargetResult] = []
     for target in targets:

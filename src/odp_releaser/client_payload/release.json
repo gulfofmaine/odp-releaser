@@ -1,5 +1,5 @@
 {
-  "image_name": "buoy_retriever_backend",
+  "image_name": "ghcr.io/ioos/buoy_retriever_backend",
   "digest": "sha256:1f3d0c9a2b7e4d6f8a0c1e2b3d4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f",
   "tag": "9e1a2b3",
   "git_sha": "9e1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90",

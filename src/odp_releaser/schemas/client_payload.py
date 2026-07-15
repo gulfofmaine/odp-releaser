@@ -45,7 +45,18 @@ class ClientPayloadSource(BaseModel):
 class ClientPayload(BaseModel):
     """repository_dispatch payload for image updates."""
 
-    image_name: Annotated[str, Field(..., description="Name of the image")]
+    image_name: Annotated[
+        str,
+        Field(
+            ...,
+            description=(
+                "Full image name exactly as deployment manifests reference it, "
+                "with the registry host included when the registry is not Docker "
+                "Hub (e.g. 'gmri/my-service' or 'ghcr.io/owner/my-service'). No "
+                "tag or digest suffix."
+            ),
+        ),
+    ]
     digest: Annotated[
         str,
         Field(
@@ -62,6 +73,19 @@ class ClientPayload(BaseModel):
         ClientPayloadSource, Field(description="Source information of the payload")
     ]
     repo: Annotated[str, Field(..., description="Repository")]
+
+    @field_validator("image_name", mode="after")
+    @classmethod
+    def _validate_image_name(cls, value: str) -> str:
+        if "@" in value or ":" in value:
+            msg = (
+                "image_name must be the plain image name as deployment manifests "
+                "reference it (e.g. 'gmri/my-service' or "
+                "'ghcr.io/owner/my-service'), without tag or digest; got "
+                f"'{value}'"
+            )
+            raise ValueError(msg)
+        return value
 
     @field_validator("digest", mode="after")
     @classmethod

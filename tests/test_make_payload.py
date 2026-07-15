@@ -20,10 +20,9 @@ CLIENT_PAYLOAD_EXAMPLES = (
 )
 
 COMMON_KWARGS = {
-    "image_name": "climatology_py_dash",
+    "image_name": "ghcr.io/gulfofmaine/climatology_py_dash",
     "tag": "3f52d83",
     "digest": "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
-    "image_repository": "ghcr.io/gulfofmaine",
     "repo": "gulfofmaine/climatology_py_dash",
     "actor": "abkfenris",
     "run_id": "29046325966",
@@ -49,7 +48,7 @@ def test_build_payload_push_with_pr() -> None:
 
     assert payload.model_dump(mode="json") == snapshot(
         {
-            "image_name": "climatology_py_dash",
+            "image_name": "ghcr.io/gulfofmaine/climatology_py_dash",
             "digest": "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
             "tag": "3f52d83",
             "git_sha": "3f52d837400fbc2b6719c6d70bf60f46c46bdfc9",
@@ -88,7 +87,7 @@ def test_build_payload_push_without_pr() -> None:
 
     assert payload.model_dump(mode="json") == snapshot(
         {
-            "image_name": "climatology_py_dash",
+            "image_name": "ghcr.io/gulfofmaine/climatology_py_dash",
             "digest": "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
             "tag": "3f52d83",
             "git_sha": "3f52d837400fbc2b6719c6d70bf60f46c46bdfc9",
@@ -128,7 +127,7 @@ def test_build_payload_release() -> None:
 
     assert payload.model_dump(mode="json") == snapshot(
         {
-            "image_name": "climatology_py_dash",
+            "image_name": "ghcr.io/gulfofmaine/climatology_py_dash",
             "digest": "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
             "tag": "3f52d83",
             "git_sha": "78a7de370c4f8a6d0f0f1a49a59f15fcd703c92b",
@@ -174,7 +173,7 @@ def test_build_payload_workflow_dispatch() -> None:
 
     assert payload.model_dump(mode="json") == snapshot(
         {
-            "image_name": "climatology_py_dash",
+            "image_name": "ghcr.io/gulfofmaine/climatology_py_dash",
             "digest": "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
             "tag": "3f52d83",
             "git_sha": "5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c",
@@ -255,6 +254,64 @@ def test_build_payload_rejects_non_digest_string() -> None:
     assert "Strip any repository prefix" in str(excinfo.value)
 
 
+# --- image_name validation ---------------------------------------------------
+
+
+def test_build_payload_rejects_image_name_with_tag() -> None:
+    kwargs = {**COMMON_KWARGS, "image_name": "gmri/foo:latest"}
+
+    with pytest.raises(ValidationError) as excinfo:
+        build_payload(
+            **kwargs,
+            ref_name="main",
+            sha="5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c",
+            event_name="workflow_dispatch",
+            event_data={},
+            pr=None,
+        )
+
+    assert "plain image name" in str(excinfo.value)
+
+
+def test_build_payload_rejects_image_name_with_digest() -> None:
+    kwargs = {
+        **COMMON_KWARGS,
+        "image_name": (
+            "gmri/foo@sha256:"
+            "2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b"
+        ),
+    }
+
+    with pytest.raises(ValidationError) as excinfo:
+        build_payload(
+            **kwargs,
+            ref_name="main",
+            sha="5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c",
+            event_name="workflow_dispatch",
+            event_data={},
+            pr=None,
+        )
+
+    assert "plain image name" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("image_name", ["gmri/foo", "ghcr.io/owner/foo"])
+def test_build_payload_accepts_plain_image_name(image_name: str) -> None:
+    kwargs = {**COMMON_KWARGS, "image_name": image_name}
+
+    payload = build_payload(
+        **kwargs,
+        ref_name="main",
+        sha="5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c",
+        event_name="workflow_dispatch",
+        event_data={},
+        pr=None,
+    )
+
+    assert payload.image_name == image_name
+    assert payload.image_ref == f"{image_name}@{COMMON_KWARGS['digest']}"
+
+
 # --- CLI ---------------------------------------------------------------
 
 
@@ -281,7 +338,7 @@ def test_make_payload_cli_push(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
         app,
         [
             "make-payload",
-            "climatology_py_dash",
+            "ghcr.io/gulfofmaine/climatology_py_dash",
             "3f52d83",
             "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
         ],
@@ -299,7 +356,7 @@ def test_make_payload_cli_push(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 
     assert result.exit_code == 0, result.output
     payload = ClientPayload.model_validate_json(result.stdout)
-    assert payload.image_name == "climatology_py_dash"
+    assert payload.image_name == "ghcr.io/gulfofmaine/climatology_py_dash"
     assert payload.source.event == "push"
     assert payload.source.pr is not None
     assert payload.source.pr.number == 96
@@ -329,7 +386,7 @@ def test_make_payload_cli_push_without_token_warns(
         app,
         [
             "make-payload",
-            "climatology_py_dash",
+            "ghcr.io/gulfofmaine/climatology_py_dash",
             "3f52d83",
             "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
         ],
@@ -358,7 +415,7 @@ def test_make_payload_cli_release(tmp_path: Path) -> None:
         app,
         [
             "make-payload",
-            "climatology_py_dash",
+            "ghcr.io/gulfofmaine/climatology_py_dash",
             "3f52d83",
             "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
         ],
@@ -389,7 +446,7 @@ def test_make_payload_cli_rejects_malformed_digest(tmp_path: Path) -> None:
         [
             "test",
             "make-payload",
-            "climatology_py_dash",
+            "ghcr.io/gulfofmaine/climatology_py_dash",
             "3f52d83",
             "gmri/neracoos-climatology-py-dash@sha256:"
             "041d1a8c2ef53044d3ea25d686e92e3ba02b25e8c9dbe1aa2d0d4ef27089ed39",

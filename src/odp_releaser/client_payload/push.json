@@ -1,5 +1,5 @@
 {
-  "image_name": "buoy_retriever_s3_timeseries",
+  "image_name": "ghcr.io/ioos/buoy_retriever_s3_timeseries",
   "digest": "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b",
   "tag": "7c8d9e0",
   "git_sha": "7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",

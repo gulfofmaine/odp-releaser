@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 API = "https://api.github.com"
 
-IMAGE = "climatology_py_dash"
+IMAGE = "ghcr.io/gulfofmaine/climatology_py_dash"
 TAG = "3f52d83"
 DIGEST = "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b"
 REPO = "gulfofmaine/climatology_py_dash"
@@ -64,7 +64,6 @@ def _expected_client_payload() -> dict[str, Any]:
         image_name=IMAGE,
         tag=TAG,
         digest=DIGEST,
-        image_repository="ghcr.io/gulfofmaine",
         repo=REPO,
         actor="abkfenris",
         run_id="29046325966",

@@ -63,10 +63,9 @@ jobs:
       contents: read
       pull-requests: read
     with:
-      image_name: buoy_retriever_hohonu
+      image_name: ghcr.io/ioos/buoy_retriever_hohonu
       tag: ${{ needs.shortsha.outputs.shortsha }}
       digest: ${{ needs.build_test_push.outputs.image_digest }}
-      # image_repository: ghcr.io/gulfofmaine/my-service  # optional
       # environment: production                           # optional gate
       # deploy_targets_path: .github/deploy_targets.yaml  # optional
       # verbosity: 1                                       # optional, default
@@ -84,10 +83,9 @@ above.
 
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
-| `image_name` | yes | — | Name of the image that was published. |
+| `image_name` | yes | — | The image name exactly as your deployment manifests reference it. For Docker Hub this is `owner/name` (no `docker.io/` prefix); for other registries it must include the registry host (e.g. `ghcr.io/ioos/buoy_retriever_hohonu`). No tag or digest suffix. |
 | `tag` | yes | — | Tag the image was published under. |
 | `digest` | yes | — | Digest (`sha256:...`) of the published image. Must be a bare digest; a value still carrying a `repo@` prefix (e.g. from `docker inspect`'s `RepoDigests`) is rejected. |
-| `image_repository` | no | `ghcr.io/<owner>` | Image repository, e.g. `ghcr.io/owner/name`. |
 | `environment` | no | `""` | GitHub environment used to gate the dispatch behind protection rules. Empty means no gating. |
 | `deploy_targets_path` | no | `.github/deploy_targets.yaml` | Path to the deploy-targets file in the calling repo. |
 | `verbosity` | no | `1` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
