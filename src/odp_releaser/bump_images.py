@@ -6,7 +6,7 @@ from typing import Annotated, Protocol
 import ruamel.yaml
 import typer
 
-from odp_releaser.github_output import write_github_output
+from odp_releaser.github_output import write_github_output, write_step_summary
 from odp_releaser.logger import logger
 from odp_releaser.manifests.file import update_file_with_payload
 from odp_releaser.manifests.helm import update_helm_values_with_payload
@@ -208,6 +208,7 @@ def bump_images(
             "pr_body": pr_body,
         }
     )
+    write_step_summary(f"# {'\n'.join(commit_message)}")
 
 
 def _pr_title_and_body(commit_message: list[str]) -> tuple[str, str]:

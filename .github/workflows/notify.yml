@@ -100,10 +100,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
-        with:
-          enable-cache: false
+      - name: Install ODP Releaser
+        uses: ./.github/actions/install.yml
 
       - name: Notify deploy targets
         env:
@@ -116,7 +114,6 @@ jobs:
           DISPATCH_APP_ID: ${{ secrets.dispatch_app_id }}
           DISPATCH_APP_PRIVATE_KEY: ${{ secrets.dispatch_app_private_key }}
           DISPATCH_APPS: ${{ secrets.dispatch_apps }}
-          ODP_RELEASER_REF: ${{ github.job_workflow_sha }}
           VERBOSITY: ${{ inputs.verbosity }}
         run: |
           case "$VERBOSITY" in
@@ -125,5 +122,4 @@ jobs:
             2) FLAGS=(-vv) ;;
             *) FLAGS=(-vvv) ;;
           esac
-          uvx --from "git+https://github.com/gulfofmaine/odp-releaser@${ODP_RELEASER_REF}" \
-            odp-releaser "${FLAGS[@]}" notify "$IMAGE_NAME" "$TAG" "$DIGEST"
+          odp-releaser "${FLAGS[@]}" notify "$IMAGE_NAME" "$TAG" "$DIGEST"
