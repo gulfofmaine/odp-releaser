@@ -1,6 +1,9 @@
+import re
 from typing import Annotated
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
+
+_DIGEST_PATTERN = re.compile(r"^[a-z0-9]+(?:[._+-][a-z0-9]+)*:[0-9a-fA-F]{32,}$")
 
 
 class Release(BaseModel):
@@ -42,8 +45,27 @@ class ClientPayloadSource(BaseModel):
 class ClientPayload(BaseModel):
     """repository_dispatch payload for image updates."""
 
-    image_name: Annotated[str, Field(..., description="Name of the image")]
-    digest: Annotated[str, Field(..., description="Digest of the image")]
+    image_name: Annotated[
+        str,
+        Field(
+            ...,
+            description=(
+                "Full image name exactly as deployment manifests reference it, "
+                "with the registry host included when the registry is not Docker "
+                "Hub (e.g. 'gmri/my-service' or 'ghcr.io/owner/my-service'). No "
+                "tag or digest suffix."
+            ),
+        ),
+    ]
+    digest: Annotated[
+        str,
+        Field(
+            ...,
+            description=(
+                "Bare digest of the image, e.g. 'sha256:<hex>' (no repository prefix)"
+            ),
+        ),
+    ]
     tag: Annotated[str, Field(..., description="Tag of the image")]
     git_sha: Annotated[str, Field(..., description="Git SHA of the commit")]
     image_ref: Annotated[str, Field(..., description="Full reference of the image")]
@@ -51,6 +73,32 @@ class ClientPayload(BaseModel):
         ClientPayloadSource, Field(description="Source information of the payload")
     ]
     repo: Annotated[str, Field(..., description="Repository")]
+
+    @field_validator("image_name", mode="after")
+    @classmethod
+    def _validate_image_name(cls, value: str) -> str:
+        if "@" in value or ":" in value:
+            msg = (
+                "image_name must be the plain image name as deployment manifests "
+                "reference it (e.g. 'gmri/my-service' or "
+                "'ghcr.io/owner/my-service'), without tag or digest; got "
+                f"'{value}'"
+            )
+            raise ValueError(msg)
+        return value
+
+    @field_validator("digest", mode="after")
+    @classmethod
+    def _validate_digest(cls, value: str) -> str:
+        if not _DIGEST_PATTERN.match(value):
+            msg = (
+                f"digest must be a bare image digest like 'sha256:<hex>', got "
+                f"'{value}'. Strip any repository prefix (docker inspect "
+                "RepoDigests output is 'repo@sha256:...' — pass only the part "
+                "after '@')."
+            )
+            raise ValueError(msg)
+        return value
 
     def new_tag(self) -> str:
         if self.source.event == "release":

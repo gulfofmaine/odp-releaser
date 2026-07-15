@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 API = "https://api.github.com"
 
-IMAGE = "climatology_py_dash"
+IMAGE = "ghcr.io/gulfofmaine/climatology_py_dash"
 TAG = "3f52d83"
 DIGEST = "sha256:2a4b6c8d0e1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b"
 REPO = "gulfofmaine/climatology_py_dash"
@@ -64,7 +64,6 @@ def _expected_client_payload() -> dict[str, Any]:
         image_name=IMAGE,
         tag=TAG,
         digest=DIGEST,
-        image_repository="ghcr.io/gulfofmaine",
         repo=REPO,
         actor="abkfenris",
         run_id="29046325966",
@@ -343,6 +342,30 @@ def test_notify_schema_mismatch_exits_nonzero(tmp_path: Path) -> None:
     assert result.exception is None or isinstance(
         result.exception, (typer.Exit, SystemExit)
     )
+
+
+def test_notify_malformed_digest_exits_nonzero(tmp_path: Path) -> None:
+    summary = tmp_path / "summary"
+    targets = tmp_path / "deploy_targets.yaml"
+    targets.write_text("[]")
+    bad_digest = (
+        "gmri/neracoos-climatology-py-dash@sha256:"
+        "041d1a8c2ef53044d3ea25d686e92e3ba02b25e8c9dbe1aa2d0d4ef27089ed39"
+    )
+
+    runner = typer.testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["notify", IMAGE, TAG, bad_digest],
+        env=_env(tmp_path, targets_path=targets, summary_path=summary),
+    )
+
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(
+        result.exception, (typer.Exit, SystemExit)
+    )
+    output = result.output or result.stderr
+    assert "Strip any repository prefix" in output
 
 
 # --- test-notify --------------------------------------------------------------

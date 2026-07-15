@@ -19,10 +19,10 @@ def _payload(image_name: str = IMAGE_NAME) -> ClientPayload:
     return ClientPayload.model_validate(
         {
             "image_name": image_name,
-            "digest": "sha256:abc123",
+            "digest": "sha256:abc123abc123abc123abc123abc123abc123",
             "tag": "9f8e7d6",
             "git_sha": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
-            "image_ref": f"{image_name}@sha256:abc123",
+            "image_ref": f"{image_name}@sha256:abc123abc123abc123abc123abc123abc123",
             "repo": "gulfofmaine/NERACOOS_ERDDAP_K8S",
             "source": {
                 "event": "push",

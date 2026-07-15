@@ -27,10 +27,10 @@ def _payload() -> ClientPayload:
     return ClientPayload.model_validate(
         {
             "image_name": IMAGE_NAME,
-            "digest": "sha256:abc123",
+            "digest": "sha256:abc123abc123abc123abc123abc123abc123",
             "tag": "7c8d9e0",
             "git_sha": "7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
-            "image_ref": f"{IMAGE_NAME}@sha256:abc123",
+            "image_ref": f"{IMAGE_NAME}@sha256:abc123abc123abc123abc123abc123abc123",
             "repo": "gulfofmaine/Neracoos-1-Buoy-App",
             "source": {
                 "event": "push",
@@ -77,7 +77,7 @@ def test_digest_pin_sets_digest_and_leaves_new_tag_untouched() -> None:
         commit_message,
     )
 
-    assert 'digest: "sha256:abc123"' in result
+    assert 'digest: "sha256:abc123abc123abc123abc123abc123abc123"' in result
     # newTag is left as it was before the update -- only the pinned field
     # ("digest" here) gets written.
     assert 'newTag: "5763586"' in result
@@ -106,4 +106,4 @@ def test_digest_template_variable_is_available_in_set() -> None:
         commit_message,
     )
 
-    assert "k8s?ref=sha256:abc123" in result
+    assert "k8s?ref=sha256:abc123abc123abc123abc123abc123abc123" in result

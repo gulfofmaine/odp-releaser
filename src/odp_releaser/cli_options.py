@@ -37,14 +37,6 @@ GitHubRefName = Annotated[
 GitHubSha = Annotated[
     str, typer.Option(envvar="GITHUB_SHA", help="Git SHA of the commit")
 ]
-ImageRepository = Annotated[
-    str | None,
-    typer.Option(
-        envvar="IMAGE_REPOSITORY",
-        help="Registry/namespace the image was pushed to. Defaults to "
-        "ghcr.io/ + the owner of GITHUB_REPOSITORY.",
-    ),
-]
 GitHubToken = Annotated[
     str | None,
     typer.Option(

@@ -63,10 +63,9 @@ jobs:
       contents: read
       pull-requests: read
     with:
-      image_name: buoy_retriever_hohonu
+      image_name: ghcr.io/ioos/buoy_retriever_hohonu
       tag: ${{ needs.shortsha.outputs.shortsha }}
       digest: ${{ needs.build_test_push.outputs.image_digest }}
-      # image_repository: ghcr.io/gulfofmaine/my-service  # optional
       # environment: production                           # optional gate
       # deploy_targets_path: .github/deploy_targets.yaml  # optional
       # verbosity: 1                                       # optional, default
@@ -84,10 +83,9 @@ above.
 
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
-| `image_name` | yes | — | Name of the image that was published. |
+| `image_name` | yes | — | The image name exactly as your deployment manifests reference it. For Docker Hub this is `owner/name` (no `docker.io/` prefix); for other registries it must include the registry host (e.g. `ghcr.io/ioos/buoy_retriever_hohonu`). No tag or digest suffix. |
 | `tag` | yes | — | Tag the image was published under. |
-| `digest` | yes | — | Digest (`sha256:...`) of the published image. |
-| `image_repository` | no | `ghcr.io/<owner>` | Image repository, e.g. `ghcr.io/owner/name`. |
+| `digest` | yes | — | Digest (`sha256:...`) of the published image. Must be a bare digest; a value still carrying a `repo@` prefix (e.g. from `docker inspect`'s `RepoDigests`) is rejected. |
 | `environment` | no | `""` | GitHub environment used to gate the dispatch behind protection rules. Empty means no gating. |
 | `deploy_targets_path` | no | `.github/deploy_targets.yaml` | Path to the deploy-targets file in the calling repo. |
 | `verbosity` | no | `1` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
@@ -144,6 +142,10 @@ Runs in the **deploy** repo, triggered by the `repository_dispatch` event
 that `notify` sends. It matches the incoming image against
 `.github/image_manifest.yaml` and either commits the updated manifests
 directly or opens a pull request, depending on that image's `update_mode`.
+An image with no entry at all in `images` is treated as a configuration
+error: `bump-images` exits non-zero and lists the images that are
+configured. An image that has an entry but an empty list of configs is a
+deliberate no-op and succeeds without changes.
 
 ### Caller example
 

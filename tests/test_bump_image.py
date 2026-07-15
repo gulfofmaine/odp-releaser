@@ -121,8 +121,8 @@ def test_dagster_helm_and_kustomize_dry_run(
     assert pr_body.endswith("Automated image bump by odp-releaser.")
 
 
-def test_no_config_for_image_reports_unchanged(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_unknown_image_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -130,8 +130,38 @@ def test_no_config_for_image_reports_unchanged(
     client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/some-unconfigured-image", client_payload)
 
+    config_path = MANIFESTS_DIR / "push" / "image_manifest.yaml"
+
+    with pytest.raises(typer.Exit) as excinfo:
+        bump_images(
+            config_path=config_path,
+            client_payload=client_payload.model_dump_json(),
+            dry_run=True,
+        )
+
+    assert excinfo.value.exit_code == 1
+
+    stderr = capsys.readouterr().err
+    assert "gmri/some-unconfigured-image" in stderr
+    assert str(config_path) in stderr
+    assert "configured images" in stderr
+    assert "gmri/neracoos-mariners-dashboard" in stderr
+
+
+def test_image_present_with_empty_config_list_is_a_noop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text("images:\n  gmri/neracoos-mariners-dashboard: []\n")
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+
     bump_images(
-        config_path=MANIFESTS_DIR / "push" / "image_manifest.yaml",
+        config_path=config_path,
         client_payload=client_payload.model_dump_json(),
         dry_run=True,
     )
@@ -164,7 +194,10 @@ def test_allowed_source_repos_allows_listed_repo(
 
     config_path = tmp_path / "image_manifest.yaml"
     config_path.write_text(
-        "allowed_source_repos:\n  - ioos/buoy_retriever\nimages: {}\n"
+        "allowed_source_repos:\n"
+        "  - ioos/buoy_retriever\n"
+        "images:\n"
+        "  gmri/neracoos-mariners-dashboard: []\n"
     )
 
     client_payload = load_client_payload(EventType.push)

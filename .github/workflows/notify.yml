@@ -12,10 +12,9 @@
 #     notify:
 #       uses: gulfofmaine/odp-releaser/.github/workflows/notify.yml@<ref>
 #       with:
-#         image_name: my-service
+#         image_name: ghcr.io/gulfofmaine/my-service
 #         tag: ${{ github.ref_name }}
 #         digest: ${{ steps.build.outputs.digest }}
-#         # image_repository: ghcr.io/gulfofmaine/my-service  # optional
 #         # environment: production                           # optional gate
 #         # deploy_targets_path: .github/deploy_targets.yaml  # optional
 #         # verbosity: 1                                       # optional, default
@@ -30,7 +29,10 @@ on:
   workflow_call:
     inputs:
       image_name:
-        description: Name of the image that was published.
+        description: >-
+          Full image name exactly as your deployment manifests reference it,
+          with the registry host when the registry is not Docker Hub (e.g.
+          gmri/my-service or ghcr.io/owner/my-service). No tag or digest.
         required: true
         type: string
       tag:
@@ -41,13 +43,6 @@ on:
         description: Digest (sha256:...) of the published image.
         required: true
         type: string
-      image_repository:
-        description: >-
-          Optional image repository (e.g. ghcr.io/owner/name). Defaults to
-          ghcr.io/<owner> when left empty.
-        required: false
-        type: string
-        default: ""
       environment:
         description: >-
           Optional GitHub environment used to gate the dispatch behind
@@ -121,7 +116,6 @@ jobs:
           IMAGE_NAME: ${{ inputs.image_name }}
           TAG: ${{ inputs.tag }}
           DIGEST: ${{ inputs.digest }}
-          IMAGE_REPOSITORY: ${{ inputs.image_repository }}
           DEPLOY_TARGETS_PATH: ${{ inputs.deploy_targets_path }}
           GITHUB_TOKEN: ${{ github.token }}
           DISPATCH_APP_ID: ${{ secrets.dispatch_app_id }}

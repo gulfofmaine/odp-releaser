@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
-from pydantic import HttpUrl
+from pydantic import HttpUrl, ValidationError
 
 from odp_releaser.cli_options import (
     GitHubActor,
@@ -25,7 +25,6 @@ from odp_releaser.cli_options import (
     GitHubServerUrl,
     GitHubSha,
     GitHubToken,
-    ImageRepository,
 )
 from odp_releaser.github import pr_for_commit
 from odp_releaser.logger import logger
@@ -60,7 +59,6 @@ def build_payload(
     image_name: str,
     tag: str,
     digest: str,
-    image_repository: str,
     repo: str,
     actor: str,
     run_id: str,
@@ -87,7 +85,7 @@ def build_payload(
     ``push``, ``release``, or ``workflow_dispatch``.
     """
     run_url = f"{server_url}/{repo}/actions/runs/{run_id}"
-    image_ref = f"{image_repository}/{image_name}@{digest}"
+    image_ref = f"{image_name}@{digest}"
 
     release: Release | None = None
     pull_request: PullRequest | None = None
@@ -150,22 +148,18 @@ def resolve_client_payload(
     github_run_id: str,
     github_ref_name: str,
     github_sha: str,
-    image_repository: str | None,
     github_token: str | None,
     github_server_url: str,
 ) -> ClientPayload:
     """Turn the GitHub Actions environment into a :class:`ClientPayload`.
 
-    Computes the image ``repository`` (defaulting to ``ghcr.io/<owner>``),
-    looks up the associated pull request for ``push`` events when a token is
+    Looks up the associated pull request for ``push`` events when a token is
     available, reads the event JSON from ``github_event_path`` for ``release``
     events, and delegates to :func:`build_payload`.
 
     ``pr_for_commit`` is referenced through this module so tests can
     ``monkeypatch`` ``odp_releaser.make_payload.pr_for_commit``.
     """
-    repository = image_repository or f"ghcr.io/{github_repository.partition('/')[0]}"
-
     pr: PrMerge | None = None
     if github_event_name == PUSH_EVENT:
         if github_token:
@@ -184,7 +178,6 @@ def resolve_client_payload(
         image_name=image_name,
         tag=tag,
         digest=digest,
-        image_repository=repository,
         repo=github_repository,
         actor=github_actor,
         run_id=github_run_id,
@@ -210,7 +203,6 @@ def make_payload(
     github_run_id: GitHubRunId,
     github_ref_name: GitHubRefName,
     github_sha: GitHubSha,
-    image_repository: ImageRepository = None,
     github_token: GitHubToken = None,
     github_server_url: GitHubServerUrl = "https://github.com",
 ) -> None:
@@ -225,21 +217,25 @@ def make_payload(
     stderr.
     """
     # pylint: disable=duplicate-code
-    payload = resolve_client_payload(
-        image_name=image_name,
-        tag=tag,
-        digest=digest,
-        github_event_name=github_event_name,
-        github_event_path=github_event_path,
-        github_repository=github_repository,
-        github_actor=github_actor,
-        github_run_id=github_run_id,
-        github_ref_name=github_ref_name,
-        github_sha=github_sha,
-        image_repository=image_repository,
-        github_token=github_token,
-        github_server_url=github_server_url,
-    )
+    try:
+        payload = resolve_client_payload(
+            image_name=image_name,
+            tag=tag,
+            digest=digest,
+            github_event_name=github_event_name,
+            github_event_path=github_event_path,
+            github_repository=github_repository,
+            github_actor=github_actor,
+            github_run_id=github_run_id,
+            github_ref_name=github_ref_name,
+            github_sha=github_sha,
+            github_token=github_token,
+            github_server_url=github_server_url,
+        )
+    except ValidationError as exc:
+        logger.error("%s", exc)
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
     # pylint: enable=duplicate-code
 
     typer.echo(payload.model_dump_json())
