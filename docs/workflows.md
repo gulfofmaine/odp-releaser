@@ -144,6 +144,10 @@ Runs in the **deploy** repo, triggered by the `repository_dispatch` event
 that `notify` sends. It matches the incoming image against
 `.github/image_manifest.yaml` and either commits the updated manifests
 directly or opens a pull request, depending on that image's `update_mode`.
+An image with no entry at all in `images` is treated as a configuration
+error: `bump-images` exits non-zero and lists the images that are
+configured. An image that has an entry but an empty list of configs is a
+deliberate no-op and succeeds without changes.
 
 ### Caller example
 

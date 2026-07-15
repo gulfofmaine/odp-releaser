@@ -129,6 +129,18 @@ def bump_images(
         typer.echo(message, err=True)
         raise typer.Exit(1)
 
+    if payload.image_name not in config.images:
+        configured_images = (
+            ", ".join(sorted(config.images)) if config.images else "(none)"
+        )
+        message = (
+            f"Image '{payload.image_name}' is not configured in {config_path}; "
+            f"configured images: {configured_images}"
+        )
+        logger.error(message)
+        typer.echo(message, err=True)
+        raise typer.Exit(1)
+
     commit_message = [
         f"Update image {payload.image_name} to {payload.new_tag()}",
         "",
