@@ -15,6 +15,7 @@ runs:
     - name: Install ODP Releaser
       env:
         ODP_RELEASER_REF: ${{ job.workflow_sha }}
+      shell: bash
       run:
         uv tool install
         git+https://github.com/gulfofmaine/odp-releaser.git@${ODP_RELEASER_REF}
