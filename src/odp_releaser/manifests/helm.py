@@ -38,13 +38,14 @@ def update_helm_values_with_payload(
     processor = open_for_editing(values_text)
     logger.debug(f"Original values for {values_path}: {processor.data}")
 
-    apply_set_templates(processor, manifest.set, payload, commit_message)
+    helm_message: list[str] = []
+
+    apply_set_templates(processor, manifest.set, payload, helm_message)
 
     if manifest.dagster_user_code:
         tag_path = f'/deployments[image.repository="{payload.image_name}"]/image/tag'
         matches = list(processor.get_nodes(tag_path, mustexist=False))
         if matches:
-            commit_message.append(f"- Updated helm values at {values_path}")
             message = set_value(
                 processor,
                 tag_path,
@@ -52,7 +53,7 @@ def update_helm_values_with_payload(
                 mustexist=True,
                 value_format=YAMLValueFormats.DQUOTE,
             )
-            commit_message.append(f"  - {message}")
+            helm_message.append(f"  - {message}")
         else:
             logger.warning(
                 f"No dagster deployment in {values_path} has an "
@@ -64,5 +65,9 @@ def update_helm_values_with_payload(
 
     yaml.dump(processor.data, stream)
     stream.seek(0)
+
+    if len(helm_message) > 0:
+        commit_message.append(f"- Updated helm values for {values_path}:")
+        commit_message.extend(helm_message)
 
     return stream.read()
