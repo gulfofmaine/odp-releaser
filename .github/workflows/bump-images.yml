@@ -101,7 +101,9 @@ jobs:
           persist-credentials: true
 
       - name: Install ODP Releaser
-        uses: ./.github/actions/install.yml
+        uses:
+          gulfofmaine/odp-releaser/.github/actions/install@${{ job.workflow_sha
+          }}
 
       - name: Bump images
         id: bump
