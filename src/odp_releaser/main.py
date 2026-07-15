@@ -49,7 +49,6 @@ def install(ctx: typer.Context, shell: Shells) -> None:
 app.add_typer(generate_app, name="generate-config")
 app.command()(notify)
 app.command()(bump_images)
-app.command()(make_payload)
 
 app_test = typer.Typer(
     no_args_is_help=True,
@@ -57,6 +56,7 @@ app_test = typer.Typer(
 )
 app_test.command(name="notify")(test_notify)
 app_test.command(name="bump-images")(test_bump_images)
+app_test.command(name="make-payload")(make_payload)
 app.add_typer(app_test, name="test")
 
 

@@ -100,17 +100,14 @@ jobs:
           token: ${{ steps.app-token.outputs.token || github.token }}
           persist-credentials: true
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
-        with:
-          enable-cache: false
+      - name: Install ODP Releaser
+        uses: ./.github/actions/install.yml
 
       - name: Bump images
         id: bump
         env:
           IMAGE_MANIFEST_CONFIG_PATH: ${{ inputs.config_path }}
           CLIENT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
-          ODP_RELEASER_REF: ${{ github.job_workflow_sha }}
           VERBOSITY: ${{ inputs.verbosity }}
         run: |
           case "$VERBOSITY" in
@@ -119,8 +116,7 @@ jobs:
             2) FLAGS=(-vv) ;;
             *) FLAGS=(-vvv) ;;
           esac
-          uvx --from "git+https://github.com/gulfofmaine/odp-releaser@${ODP_RELEASER_REF}" \
-            odp-releaser "${FLAGS[@]}" bump-images
+          odp-releaser "${FLAGS[@]}" bump-images
 
       - name: Commit bump
         if:

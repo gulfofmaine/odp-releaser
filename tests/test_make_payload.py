@@ -238,6 +238,7 @@ def test_make_payload_cli_push(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     result = runner.invoke(
         app,
         [
+            "test",
             "make-payload",
             "climatology_py_dash",
             "3f52d83",
@@ -286,6 +287,7 @@ def test_make_payload_cli_push_without_token_warns(
     result = runner.invoke(
         app,
         [
+            "test",
             "make-payload",
             "climatology_py_dash",
             "3f52d83",
@@ -315,6 +317,7 @@ def test_make_payload_cli_release(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         [
+            "test",
             "make-payload",
             "climatology_py_dash",
             "3f52d83",
