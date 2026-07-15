@@ -101,9 +101,8 @@ jobs:
           persist-credentials: false
 
       - name: Install ODP Releaser
-        uses:
-          gulfofmaine/odp-releaser/.github/actions/install@${{ job.workflow_sha
-          }}
+        # prettier-ignore
+        uses: gulfofmaine/odp-releaser/.github/actions/install@${{ job.workflow_sha }}
 
       - name: Notify deploy targets
         env:
