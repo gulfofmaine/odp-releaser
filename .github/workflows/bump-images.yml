@@ -105,12 +105,12 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: ""
-          cache-suffix: "odp-releaser-${{ github.workflow_sha }}"
+          cache-suffix: "odp-releaser-${{ job.workflow_sha }}"
           prune-cache: false
 
       - name: Install ODP Releaser
         env:
-          ODP_RELEASER_REF: ${{ github.workflow_sha }}
+          ODP_RELEASER_REF: ${{ job.workflow_sha }}
         shell: bash
         run:
           uv tool install
