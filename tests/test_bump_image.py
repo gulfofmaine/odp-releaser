@@ -67,6 +67,8 @@ def test_success_path_writes_github_output(
 
     outputs = _parse_github_output(output.read_text())
     assert outputs["changed"] == "true"
+    assert outputs["image_name"] == "gmri/neracoos-mariners-dashboard"
+    assert outputs["digest"] == client_payload.digest
     assert outputs["update_mode"] == "commit"
     assert (
         outputs["branch_name"] == "odp-releaser/bump-gmri-neracoos-mariners-dashboard"
@@ -168,6 +170,8 @@ def test_image_present_with_empty_config_list_is_a_noop(
 
     outputs = _parse_github_output(output.read_text())
     assert outputs["changed"] == "false"
+    assert outputs["image_name"] == "gmri/neracoos-mariners-dashboard"
+    assert outputs["digest"] == client_payload.digest
     assert outputs["update_mode"] == "commit"
 
 

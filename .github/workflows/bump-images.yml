@@ -2,9 +2,10 @@
 #
 # This workflow is meant to be called by a deploy repo in response to a
 # repository_dispatch event sent by `odp-releaser notify`. It runs the
-# `odp-releaser bump-images` CLI, which reads the incoming client_payload
-# and this repo's image manifest, then either commits the bump directly or
-# opens a pull request with the updated image references.
+# `bump_images` composite action from this repo (checked out at the same
+# commit as this workflow file), which reads the incoming client_payload and
+# this repo's image manifest, then either commits the bump directly or opens
+# a pull request with the updated image references.
 #
 # When the deploy org's own dispatch-app credentials are supplied (via the
 # ci_app_id / ci_app_private_key secrets), the commit/PR is authored with an
@@ -57,6 +58,16 @@ on:
         required: false
         type: number
         default: 1
+    outputs:
+      image_name:
+        description: Image name the bump ran for (no tag or digest).
+        value: ${{ jobs.bump.outputs.image_name }}
+      digest:
+        description: Digest (sha256:...) of the image the bump ran for.
+        value: ${{ jobs.bump.outputs.digest }}
+      changed:
+        description: Whether any manifests changed ("true"/"false").
+        value: ${{ jobs.bump.outputs.changed }}
     secrets:
       ci_app_id:
         description: >-
@@ -81,6 +92,10 @@ jobs:
     concurrency:
       group: odp-releaser-${{ github.event.client_payload.image_name }}
       cancel-in-progress: false
+    outputs:
+      image_name: ${{ steps.bump.outputs.image_name }}
+      digest: ${{ steps.bump.outputs.digest }}
+      changed: ${{ steps.bump.outputs.changed }}
     steps:
       - name: Generate app token
         id: app-token
@@ -100,63 +115,35 @@ jobs:
           token: ${{ steps.app-token.outputs.token || github.token }}
           persist-credentials: true
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+      - name: Checkout odp-releaser
+        # This reusable workflow's own repo, at the same commit GitHub
+        # resolved for this workflow file, so the local composite actions
+        # below (and the CLI they install) stay in lockstep with the caller's
+        # pinned workflow ref.
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          enable-cache: true
-          cache-dependency-glob: ""
-          cache-suffix: "odp-releaser-${{ job.workflow_sha }}"
-          prune-cache: false
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .odp-releaser
+          persist-credentials: false
+
+      - name: Hide the odp-releaser checkout from git
+        # Keep the nested checkout out of the bump: the bump_images action's
+        # `git add -A` and peter-evans/create-pull-request (which commits
+        # untracked files) both skip ignored paths.
+        run: echo "/.odp-releaser/" >> .git/info/exclude
 
       - name: Install ODP Releaser
-        env:
-          ODP_RELEASER_REF: ${{ job.workflow_sha }}
-        shell: bash
-        run:
-          uv tool install
-          git+https://github.com/gulfofmaine/odp-releaser.git@${ODP_RELEASER_REF}
+        uses: ./.odp-releaser/.github/actions/install
+        with:
+          cache_suffix: odp-releaser-${{ job.workflow_sha }}
 
       - name: Bump images
         id: bump
-        env:
-          IMAGE_MANIFEST_CONFIG_PATH: ${{ inputs.config_path }}
-          CLIENT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
-          VERBOSITY: ${{ inputs.verbosity }}
-        run: |
-          case "$VERBOSITY" in
-            0) FLAGS=() ;;
-            1) FLAGS=(-v) ;;
-            2) FLAGS=(-vv) ;;
-            *) FLAGS=(-vvv) ;;
-          esac
-          odp-releaser "${FLAGS[@]}" bump-images
-
-      - name: Commit bump
-        if:
-          steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
-          == 'commit'
-        env:
-          GIT_USER_NAME: ${{ inputs.git_user_name }}
-          GIT_USER_EMAIL: ${{ inputs.git_user_email }}
-          COMMIT_MESSAGE: ${{ steps.bump.outputs.commit_message }}
-        run: |
-          git config user.name "$GIT_USER_NAME"
-          git config user.email "$GIT_USER_EMAIL"
-          git add -A
-          git commit -m "$COMMIT_MESSAGE"
-          git push
-
-      - name: Open bump pull request
-        if:
-          steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
-          == 'pull_request'
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1 # zizmor: ignore[superfluous-actions]
+        uses: ./.odp-releaser/.github/actions/bump_images
         with:
+          config_path: ${{ inputs.config_path }}
+          verbosity: ${{ inputs.verbosity }}
+          git_user_name: ${{ inputs.git_user_name }}
+          git_user_email: ${{ inputs.git_user_email }}
           token: ${{ steps.app-token.outputs.token || github.token }}
-          branch: ${{ steps.bump.outputs.branch_name }}
-          commit-message: ${{ steps.bump.outputs.commit_message }}
-          title: ${{ steps.bump.outputs.pr_title }}
-          body: ${{ steps.bump.outputs.pr_body }}
-          committer: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
-          author: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
-          delete-branch: true

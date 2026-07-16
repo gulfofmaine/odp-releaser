@@ -213,6 +213,8 @@ def bump_images(
     write_github_output(
         {
             "changed": "true" if changed else "false",
+            "image_name": payload.image_name,
+            "digest": payload.digest,
             "update_mode": update_mode,
             "branch_name": f"odp-releaser/bump-{sanitized_image_name}",
             "commit_message": "\n".join(commit_message),
