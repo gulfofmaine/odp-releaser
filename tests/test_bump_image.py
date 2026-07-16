@@ -13,8 +13,10 @@ from odp_releaser.bump_image_tester import (
     set_payload_image,
 )
 from odp_releaser.bump_images import bump_images
+from odp_releaser.github import AppNotInstalledOnOrgError
 from odp_releaser.main import app
 from odp_releaser.report_metadata import extract_metadata
+from odp_releaser.schemas.dispatch import DispatchAppCredentials
 
 MANIFESTS_DIR = Path(__file__).parent / "manifests"
 
@@ -493,12 +495,33 @@ images:
     assert outputs["changed"] == "false"
 
 
+_TEAM_CONFIG = """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      allowed_actors:
+        teams: [acme/deployers]
+"""
+
+
+def _fake_reporter_creds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve reporter credentials and the org token without touching GitHub."""
+    monkeypatch.setattr(
+        "odp_releaser.bump_images.resolve_reporter_credentials",
+        lambda org: DispatchAppCredentials(app_id="1", private_key=f"KEY-{org}"),
+    )
+    monkeypatch.setattr(
+        "odp_releaser.bump_images.org_installation_token_for",
+        lambda _creds, org, **_kwargs: f"tok-{org}",
+    )
+
+
 def test_allowed_actors_team_member_is_allowed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setenv("GITHUB_TOKEN", "gh_token")
+    _fake_reporter_creds(monkeypatch)
 
     calls: list[tuple[str, str, str, str]] = []
 
@@ -511,83 +534,87 @@ def test_allowed_actors_team_member_is_allowed(
     monkeypatch.setattr("odp_releaser.bump_images.is_team_member", fake_is_team_member)
 
     config_path = tmp_path / "image_manifest.yaml"
-    config_path.write_text(
-        """
-images:
-  gmri/neracoos-mariners-dashboard:
-    - events: [push]
-      allowed_actors:
-        teams: [acme/deployers]
-"""
-    )
+    config_path.write_text(_TEAM_CONFIG)
 
     client_payload = _payload_for()
     _run_bump(config_path, client_payload)
 
     outputs = _parse_github_output(output.read_text())
     assert outputs["changed"] == "false"
-    assert calls == [("acme", "deployers", client_payload.source.actor, "gh_token")]
+    # The membership check ran with the source org's reporter-app token.
+    assert calls == [("acme", "deployers", client_payload.source.actor, "tok-acme")]
 
 
 def test_allowed_actors_team_non_member_is_rejected(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("GITHUB_TOKEN", "gh_token")
+    _fake_reporter_creds(monkeypatch)
     monkeypatch.setattr(
         "odp_releaser.bump_images.is_team_member",
         lambda *_args: False,
     )
 
     config_path = tmp_path / "image_manifest.yaml"
-    config_path.write_text(
-        """
-images:
-  gmri/neracoos-mariners-dashboard:
-    - events: [push]
-      allowed_actors:
-        teams: [acme/deployers]
-"""
-    )
+    config_path.write_text(_TEAM_CONFIG)
 
     with pytest.raises(typer.Exit) as excinfo:
         _run_bump(config_path, _payload_for())
     assert excinfo.value.exit_code == 1
 
 
-def test_allowed_actors_team_without_token_errors(
+def test_allowed_actors_team_without_reporter_credentials_errors(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    for var in ("REPORTER_APPS", "REPORTER_APP_ID", "REPORTER_APP_PRIVATE_KEY"):
+        monkeypatch.delenv(var, raising=False)
 
     config_path = tmp_path / "image_manifest.yaml"
-    config_path.write_text(
-        """
-images:
-  gmri/neracoos-mariners-dashboard:
-    - events: [push]
-      allowed_actors:
-        teams: [acme/deployers]
-"""
-    )
+    config_path.write_text(_TEAM_CONFIG)
 
     with pytest.raises(typer.Exit) as excinfo:
         _run_bump(config_path, _payload_for())
 
     assert excinfo.value.exit_code == 1
     stderr = capsys.readouterr().err
-    assert "GITHUB_TOKEN" in stderr
+    assert "reporter app credentials" in stderr
     assert "acme/deployers" in stderr
 
 
-def test_allowed_actors_malformed_team_entry_errors(
+def test_allowed_actors_team_app_not_installed_errors(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("GITHUB_TOKEN", "gh_token")
+    monkeypatch.setattr(
+        "odp_releaser.bump_images.resolve_reporter_credentials",
+        lambda _org: DispatchAppCredentials(app_id="1", private_key="KEY"),
+    )
 
+    def fail_token(_creds: object, org: str, **_kwargs: object) -> str:
+        raise AppNotInstalledOnOrgError(org)
+
+    monkeypatch.setattr(
+        "odp_releaser.bump_images.org_installation_token_for", fail_token
+    )
+
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(_TEAM_CONFIG)
+
+    with pytest.raises(typer.Exit) as excinfo:
+        _run_bump(config_path, _payload_for())
+
+    assert excinfo.value.exit_code == 1
+    stderr = capsys.readouterr().err
+    assert "Members: read" in stderr
+    assert "acme/deployers" in stderr
+
+
+def test_allowed_actors_malformed_team_entry_errors(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     config_path = tmp_path / "image_manifest.yaml"
     config_path.write_text(
         """

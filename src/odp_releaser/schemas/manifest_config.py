@@ -98,10 +98,10 @@ class AllowedActors(BaseModel):
     )
     teams: list[str] = Field(
         description=(
-            "GitHub teams as org/team-slug entries. Membership is resolved "
-            "via the GitHub API, which needs a GITHUB_TOKEN with organization "
-            "members read access (an app or PAT token; the default workflow "
-            "token cannot read team membership)"
+            "GitHub teams as org/team-slug entries. Membership is checked "
+            "with the source org's reporter app credentials (REPORTER_APPS / "
+            "REPORTER_APP_ID / REPORTER_APP_PRIVATE_KEY), so that app must "
+            "also be granted the organization Members: read permission"
         ),
         default_factory=list,
     )
@@ -186,7 +186,9 @@ class ImageConfig(BaseModel):
         Field(
             description=(
                 "GitHub team slugs (no org prefix) requested as reviewers "
-                "on the bump pull request. Replaces the defaults-level list"
+                "on the bump pull request. Replaces the defaults-level "
+                "list. The bump-images workflow detects this key and mints "
+                "its app token with organization Members: read"
             ),
         ),
     ] = None
@@ -266,8 +268,9 @@ class ConfigDefaults(BaseModel):
         Field(
             description=(
                 "GitHub team slugs (no org prefix) requested as reviewers "
-                "on bump pull requests. Requesting a team review needs an "
-                "app or PAT token; the default workflow token cannot"
+                "on bump pull requests. The bump-images workflow detects "
+                "this key and mints its app token with organization "
+                "Members: read (the ci app must be granted the permission)"
             ),
         ),
     ] = None

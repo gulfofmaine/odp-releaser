@@ -72,13 +72,32 @@ inputs:
     default: "false"
   token:
     description: >-
-      Token used to push the bump commit or open the pull request, and to check
-      `allowed_actors` team membership. Pass an app-minted token if the
-      resulting commit/PR should trigger CI. Team entries in `allowed_actors`
-      and `team_reviewers` both need an app or PAT token with organization
-      members read access — the default GITHUB_TOKEN can do neither.
+      Token used to push the bump commit or open the pull request. Pass an
+      app-minted token if the resulting commit/PR should trigger CI. When the
+      image manifest configures `team_reviewers`, the token also needs
+      organization "Members: read" to request the team reviews — the
+      bump-images.yml reusable workflow mints one automatically.
     required: false
     default: ${{ github.token }}
+  reporter_apps:
+    description: >-
+      Optional JSON object mapping source owner -> {app_id, private_key}
+      reporter app credentials. Used (with organization "Members: read"
+      granted to the app) to check `allowed_actors` team membership against
+      source orgs.
+    required: false
+    default: ""
+  reporter_app_id:
+    description: >-
+      Optional App ID of the source org's reporter GitHub App, used to check
+      `allowed_actors` team membership. Fallback for owners not in
+      reporter_apps.
+    required: false
+    default: ""
+  reporter_app_private_key:
+    description: Optional private key matching reporter_app_id.
+    required: false
+    default: ""
 
 outputs:
   image_name:
@@ -144,9 +163,11 @@ runs:
         CLIENT_PAYLOAD: ${{ inputs.client_payload }}
         VERBOSITY: ${{ inputs.verbosity }}
         DRY_RUN: ${{ inputs.dry_run }}
-        # Only used to check `allowed_actors` team membership; the CLI makes
-        # no other API calls.
-        GITHUB_TOKEN: ${{ inputs.token }}
+        # Only used to check `allowed_actors` team membership against the
+        # source orgs; the CLI makes no other API calls here.
+        REPORTER_APPS: ${{ inputs.reporter_apps }}
+        REPORTER_APP_ID: ${{ inputs.reporter_app_id }}
+        REPORTER_APP_PRIVATE_KEY: ${{ inputs.reporter_app_private_key }}
       run: |
         if ! command -v odp-releaser >/dev/null; then
           echo "::error::odp-releaser CLI not found on the PATH; run the" \

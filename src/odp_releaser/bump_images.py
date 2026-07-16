@@ -1,14 +1,19 @@
 import difflib
-import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Protocol
+from typing import Annotated, NoReturn, Protocol
 
 import ruamel.yaml
 import typer
 from githubkit.exception import RequestFailed
 
-from odp_releaser.github import is_team_member
+from odp_releaser.github import (
+    AppNotInstalledOnOrgError,
+    MissingCredentialsError,
+    is_team_member,
+    org_installation_token_for,
+    resolve_reporter_credentials,
+)
 from odp_releaser.github_output import write_github_output, write_step_summary
 from odp_releaser.logger import logger
 from odp_releaser.manifests.file import update_file_with_payload
@@ -165,13 +170,11 @@ def bump_images(
         logger.debug("Filtered configs")
         logger.debug(filtered_configs)
 
-        team_membership: dict[tuple[str, str, str], bool] = {}
+        team_checker = _TeamMembershipChecker()
         authorized_configs = [
             image_config
             for image_config in filtered_configs
-            if _config_authorizes(
-                image_config, config.defaults, payload, team_membership
-            )
+            if _config_authorizes(image_config, config.defaults, payload, team_checker)
         ]
         if filtered_configs and not authorized_configs:
             message = (
@@ -330,14 +333,14 @@ def _config_authorizes(
     image_config: ImageConfig,
     defaults: ConfigDefaults,
     payload: ClientPayload,
-    team_membership: dict[tuple[str, str, str], bool],
+    team_checker: "_TeamMembershipChecker",
 ) -> bool:
     """Whether this config's resolved allowlists accept the payload.
 
     Each allowlist falls back to the ``defaults``-level value when the config
     doesn't set its own; a resolved value of ``None`` disables that check. A
     rejected config is skipped with a warning so other configs for the image
-    can still apply; ``team_membership`` caches GitHub team lookups across
+    can still apply; ``team_checker`` caches GitHub team lookups across
     configs.
     """
     allowed_repos = _resolve_setting(
@@ -358,9 +361,7 @@ def _config_authorizes(
     actor = payload.source.actor
     if actor.lower() in {user.lower() for user in allowed_actors.users}:
         return True
-    if any(
-        _actor_in_team(team, actor, team_membership) for team in allowed_actors.teams
-    ):
+    if any(team_checker.actor_in_team(team, actor) for team in allowed_actors.teams):
         return True
     logger.warning(
         f"Skipping a config for {payload.image_name}: actor '{actor}' is "
@@ -369,48 +370,66 @@ def _config_authorizes(
     return False
 
 
-def _actor_in_team(
-    team: str, actor: str, team_membership: dict[tuple[str, str, str], bool]
-) -> bool:
-    """Whether ``actor`` is an active member of an ``org/team-slug`` team.
+def _authorization_error(message: str) -> NoReturn:
+    logger.error(message)
+    typer.echo(message, err=True)
+    raise typer.Exit(1)
 
-    Not being a member is an ordinary ``False``, but a check that cannot be
-    evaluated — a malformed team entry, no ``GITHUB_TOKEN`` in the
-    environment, or an unexpected API failure — exits with an error rather
-    than silently rejecting, since the config asked for a check this run
-    can't perform.
+
+class _TeamMembershipChecker:
+    """Check ``allowed_actors`` team membership with reporter app credentials.
+
+    Teams live in the source orgs, so membership is checked with the same
+    reporter app credentials (``REPORTER_APPS`` / ``REPORTER_APP_ID`` /
+    ``REPORTER_APP_PRIVATE_KEY``) that ``report-deployment`` uses — the
+    reporter app is the one installed on the source orgs. It additionally
+    needs the organization ``Members: read`` permission there. Org tokens and
+    membership results are cached for the run.
     """
-    org, _, team_slug = team.partition("/")
-    if not org or not team_slug:
-        message = f"allowed_actors team entry '{team}' must be an 'org/team-slug' pair"
-        logger.error(message)
-        typer.echo(message, err=True)
-        raise typer.Exit(1)
 
-    key = (org, team_slug, actor.lower())
-    if key not in team_membership:
-        token = os.environ.get("GITHUB_TOKEN")
-        if not token:
-            message = (
-                f"allowed_actors team entry '{team}' requires a GITHUB_TOKEN "
-                "with organization members read access to check membership"
+    def __init__(self) -> None:
+        self._membership: dict[tuple[str, str, str], bool] = {}
+        self._org_tokens: dict[str, str] = {}
+
+    def actor_in_team(self, team: str, actor: str) -> bool:
+        """Whether ``actor`` is an active member of an ``org/team-slug`` team.
+
+        Not being a member is an ordinary ``False``, but a check that cannot
+        be evaluated — a malformed team entry, missing reporter credentials,
+        or an API failure — exits with an error rather than silently
+        rejecting, since the config asked for a check this run can't perform.
+        """
+        org, _, team_slug = team.partition("/")
+        if not org or not team_slug:
+            _authorization_error(
+                f"allowed_actors team entry '{team}' must be an 'org/team-slug' pair"
             )
-            logger.error(message)
-            typer.echo(message, err=True)
-            raise typer.Exit(1)
+
+        key = (org, team_slug, actor.lower())
+        if key not in self._membership:
+            self._membership[key] = self._check(org, team_slug, actor)
+        return self._membership[key]
+
+    def _check(self, org: str, team_slug: str, actor: str) -> bool:
         try:
-            team_membership[key] = is_team_member(org, team_slug, actor, token)
-        except RequestFailed as exc:
-            message = (
-                f"Could not check membership of '{actor}' in team '{team}': "
-                f"{exc}. The token needs organization members read access "
-                "(the default workflow GITHUB_TOKEN cannot read team "
-                "membership)."
+            if org not in self._org_tokens:
+                creds = resolve_reporter_credentials(org)
+                self._org_tokens[org] = org_installation_token_for(
+                    creds, org, permissions={"members": "read"}
+                )
+            return is_team_member(org, team_slug, actor, self._org_tokens[org])
+        except MissingCredentialsError as exc:
+            _authorization_error(
+                f"Checking allowed_actors team '{org}/{team_slug}' needs the "
+                f"source org's reporter app credentials: {exc}"
             )
-            logger.error(message)
-            typer.echo(message, err=True)
-            raise typer.Exit(1) from exc
-    return team_membership[key]
+        except (AppNotInstalledOnOrgError, RequestFailed) as exc:
+            _authorization_error(
+                f"Could not check membership of '{actor}' in team "
+                f"'{org}/{team_slug}': {exc}. The {org} org's reporter app "
+                "must be installed there and granted the organization "
+                "'Members: read' permission."
+            )
 
 
 def _pr_title_and_body(

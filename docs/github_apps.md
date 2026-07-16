@@ -196,7 +196,10 @@ Create the app in your deploy org's settings, like the dispatch app but
 with:
 
 - **Permissions**: Repository permissions → `Deployments: Read and write`.
-  Nothing else.
+  Add Organization permissions → `Members: Read-only` only if your deploy
+  repos use `allowed_actors` team entries in their image manifests — the
+  membership check runs with this app's credentials, since it's the one
+  installed where the teams live. Nothing else.
 - **Webhooks**: off, same as the dispatch app.
 - **Where can this app be installed?**: **"Any account"** — source orgs must
   be able to install it on their own repos.

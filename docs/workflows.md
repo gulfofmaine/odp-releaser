@@ -209,17 +209,16 @@ succession.
 | `verbosity` | no | `1` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
 | `client_payload` | no | `""` | Testing aid: explicit `client_payload` JSON string. Empty uses the triggering `repository_dispatch` event's payload. |
 | `dry_run` | no | `false` | Testing aid: run the CLI with `--dry-run` (no manifest files written) and skip the commit and pull-request steps. Outputs are still produced. |
-| `token_members_read` | no | `false` | Also request organization "Members: read" on the app token minted from `ci_app_id`. Required for `allowed_actors` team entries and `team_reviewers` in the image manifest config; the app itself must be granted the permission first. |
 
 ### Secrets
 
 | Secret | Required | Description |
 | --- | --- | --- |
-| `ci_app_id` | no | App ID of this repo's own GitHub App. When set, the commit/PR is authored with an app token instead of `GITHUB_TOKEN`. Also needed for `allowed_actors` team entries and `team_reviewers` (with `token_members_read: true`). |
+| `ci_app_id` | no | App ID of this repo's own GitHub App. When set, the commit/PR is authored with an app token instead of `GITHUB_TOKEN`. Also needed for `team_reviewers` in the image manifest config: when that key is present, the token is minted with organization "Members: read" added, so the app must be granted that permission. |
 | `ci_app_private_key` | no | Private key matching `ci_app_id`. |
-| `reporter_app_id` | no | App ID of the source org's reporter GitHub App. When set, a successful bump is reported back to the source repo as a GitHub deployment + status. |
+| `reporter_app_id` | no | App ID of the source org's reporter GitHub App. When set, a successful bump is reported back to the source repo as a GitHub deployment + status, and `allowed_actors` team membership is checked with it (needs organization "Members: read"). |
 | `reporter_app_private_key` | no | Private key matching `reporter_app_id`. |
-| `reporter_apps` | no | JSON object mapping source `owner -> {app_id, private_key}` for reporting to source repos across multiple orgs. |
+| `reporter_apps` | no | JSON object mapping source `owner -> {app_id, private_key}` for reporting to (and checking `allowed_actors` teams against) source repos across multiple orgs. |
 
 ### Outputs
 
@@ -278,11 +277,13 @@ replaces the default (an explicit `[]` requests none); when several matching
 configs disagree, the first in config order wins with a warning, mirroring
 how `environment` resolves.
 
-Two upstream caveats from `peter-evans/create-pull-request`: requesting a
-**team** review needs an app or PAT token with organization members read
-access — the default `GITHUB_TOKEN` can't do it (pass `ci_app_id` /
-`ci_app_private_key` and set `token_members_read: true`, after granting the
-app the organization "Members: read" permission) — and a requested reviewer
+Requesting a **team** review needs a token with organization "Members:
+read" — the default `GITHUB_TOKEN` can't do it. The workflow handles this
+automatically: when the checked-out image manifest contains a
+`team_reviewers` key, the `ci_app_id` app token is minted with that
+permission added (grant the app the organization "Members: read" permission
+first; without `ci_app_*` secrets team reviews can't be requested). One
+upstream caveat from `peter-evans/create-pull-request`: a requested reviewer
 who is the PR's author causes the request-review call to fail.
 
 ### Reporting deployments back to the source repo
@@ -441,11 +442,12 @@ triggered the source build — as its identifiers for "who sent this" (see
 
 - `allowed_source_repos`: trusted `owner/name` slugs.
 - `allowed_actors`: a mapping with `users` (GitHub usernames, compared
-  case-insensitively) and/or `teams` (`org/team-slug` entries, membership
-  resolved via the GitHub API — this needs a token with organization
-  members read access, so pass `ci_app_id` / `ci_app_private_key` and set
-  `token_members_read: true`; the default `GITHUB_TOKEN` can't read team
-  membership).
+  case-insensitively) and/or `teams` (`org/team-slug` entries). Teams live
+  in the source orgs, so membership is checked with the same
+  [reporter app](github_apps.md#reporter-apps) credentials
+  (`reporter_apps` / `reporter_app_id` / `reporter_app_private_key`) that
+  deployment reporting uses — grant the reporter app the organization
+  "Members: read" permission for this.
 
 Both can also be set under `defaults:` to apply to every config; a config's
 own value replaces the default entirely (an empty list denies everyone).
