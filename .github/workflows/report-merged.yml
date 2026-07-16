@@ -1,0 +1,98 @@
+# Reusable workflow: finish the deployment report after a bump PR merges.
+#
+# A pull_request-mode bump reports its deployment to the source repo as
+# `queued` — nothing is live until the bump PR merges. This workflow is meant
+# to be called by the deploy repo when a pull request closes: it reads the
+# report metadata that `bump-images` embedded in the PR body and re-runs
+# `odp-releaser report-deployment`, which finds the queued deployment on the
+# source repo (same commit + environment) and flips its status to `success`.
+#
+# A closed PR without embedded odp-releaser metadata is a friendly no-op, but
+# gate the job on merged bump PRs anyway (see the caller example) so the job
+# doesn't spin up for unrelated PRs.
+#
+# Minimal caller example:
+#
+#   on:
+#     pull_request:
+#       types: [closed]
+#
+#   jobs:
+#     report:
+#       if: >-
+#         github.event.pull_request.merged == true &&
+#         startsWith(github.event.pull_request.head.ref, 'odp-releaser/')
+#       uses: gulfofmaine/odp-releaser/.github/workflows/report-merged.yml@<ref>
+#       secrets:
+#         reporter_app_id: ${{ secrets.REPORTER_APP_ID }}
+#         reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }}
+#         # reporter_apps: ${{ secrets.REPORTER_APPS }}  # optional multi-org
+
+name: Report merged bump
+
+on:
+  workflow_call:
+    inputs:
+      verbosity:
+        description: >-
+          CLI verbosity: 0=warning, 1=info (default), 2 or more=debug. Maps to
+          the CLI's -v/-vv/-vvv flags (capped at 3).
+        required: false
+        type: number
+        default: 1
+    secrets:
+      reporter_apps:
+        description: >-
+          Optional JSON object mapping source owner -> {app_id, private_key}
+          reporter app credentials, for deploy repos that report to multiple
+          source orgs.
+        required: false
+      reporter_app_id:
+        description: >-
+          App ID of the reporter GitHub App installed on the source repos.
+        required: false
+      reporter_app_private_key:
+        description: Optional private key matching reporter_app_id.
+        required: false
+
+permissions: {}
+
+jobs:
+  report:
+    name: Report merged bump deployment
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout odp-releaser
+        # This reusable workflow's own repo, at the same commit GitHub
+        # resolved for this workflow file, so the local composite actions
+        # below (and the CLI they install) stay in lockstep with the caller's
+        # pinned workflow ref. The deploy repo itself is never checked out —
+        # everything needed travels in the PR body.
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .odp-releaser
+          persist-credentials: false
+
+      - name: Install ODP Releaser
+        uses: ./.odp-releaser/.github/actions/install
+        with:
+          cache_suffix: odp-releaser-${{ job.workflow_sha }}
+
+      - name: Report merged deployment
+        uses: ./.odp-releaser/.github/actions/report_deployment
+        with:
+          pr_body: ${{ github.event.pull_request.body }}
+          update_mode: commit
+          # Fallback "View deployment" link; an environment_url embedded in
+          # the PR body at bump time wins over this.
+          environment_url:
+            ${{ github.server_url }}/${{ github.repository }}/commit/${{
+            github.event.pull_request.merge_commit_sha }}
+          verbosity: ${{ inputs.verbosity }}
+          reporter_apps: ${{ secrets.reporter_apps }}
+          reporter_app_id: ${{ secrets.reporter_app_id }}
+          reporter_app_private_key: ${{ secrets.reporter_app_private_key }}

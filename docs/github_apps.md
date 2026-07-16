@@ -182,51 +182,79 @@ source repo's pull request timeline then shows "deployed to *environment*"
 entries, and its Environments sidebar shows the latest deployed commit per
 deploy repo — with no comment formatting or notification plumbing.
 
-The ownership model mirrors the dispatch app, with the orgs swapped:
+Unlike the dispatch role — where per-source-org keys guard a powerful
+`contents: write` grant — the reporter only ever needs `deployments: write`,
+a low-stakes permission that can create deployment records but never touch
+code. That makes a much simpler ownership model the recommended default:
+**one app, owned by the deploy org, installed by each source org that wants
+reports**. No private key is ever shared; installing the app *is* the
+consent, and uninstalling it *is* the revocation.
 
-- The **source org** owns and runs the reporter app, installs it only on its
-  own source repos, and hands a private key to each deploy org it wants
-  reports from.
-- The app needs a single repository permission: `Deployments: Read and
-  write`. Webhooks off, same as the dispatch app.
-- Suggested name pattern: `<org>-odp-reporter`.
+### For deploy org admins (recommended: one shared reporter app)
 
-### For source org admins
+Create the app in your deploy org's settings, like the dispatch app but
+with:
 
-Follow the same steps as the dispatch app above — create the org-level app
-(with `Deployments: Read and write` instead of contents/PR permissions),
-install it on the source repos that should receive deployment reports, and
-generate one private key per deploy org you trust. Revocation and rotation
-work identically.
+- **Permissions**: Repository permissions → `Deployments: Read and write`.
+  Nothing else.
+- **Webhooks**: off, same as the dispatch app.
+- **Where can this app be installed?**: **"Any account"** — source orgs must
+  be able to install it on their own repos.
+- **Name**: suggested pattern `<org>-odp-reporter`, e.g.
+  `gulfofmaine-odp-reporter`.
+
+Generate a single private key and store it — together with the App ID — as
+GitHub Actions secrets in your deploy repos (or org):
+`REPORTER_APP_ID` / `REPORTER_APP_PRIVATE_KEY`. The key never leaves your
+org. Then share the app's public install link with each source org.
+
+Pass the secrets to `bump-images.yml` and `report-merged.yml` as the
+`reporter_app_id` / `reporter_app_private_key` secrets — see
+[Bump images](workflows.md#bump-images) and
+[Report merged](workflows.md#report-merged). In `bump-images.yml` reporting
+is best-effort: a failed report never fails the bump itself.
+
+### For source repo maintainers
+
+Install the deploy org's reporter app on the source repos that should
+receive deployment reports (repo **Settings** won't show it — use the app's
+public page / install link the deploy org shares). Before consenting,
+you can verify on that page that the app requests only
+`Deployments: Read and write`. To revoke a deploy org's ability to report,
+uninstall its app — no key coordination needed.
 
 One caveat: creating a deployment fires a `deployment` webhook/Actions event
 in the source repo. That's harmless unless a source workflow triggers `on:
 deployment` — check before installing if your source repos have such
 workflows.
 
-### For deploy repo maintainers
+### Alternative: source-org-owned reporter apps
 
-Store the reporter credentials as GitHub Actions secrets in the deploy repo
-(or org), mirroring the dispatch pair on the other side:
+Orgs that prefer the dispatch model's tighter blast-radius can mirror it
+instead: the *source* org owns the reporter app, installs it on its own
+repos, and hands a private key to each deploy org it wants reports from
+(one key per deploy org, revocable individually). The tradeoff is real key
+sharing and rotation work — justified when a leaked deploy-org secret
+reaching *all* installed source repos' deployments is a concern, less so
+given the permission can't modify code.
 
-- **Single source org**: `REPORTER_APP_ID` and `REPORTER_APP_PRIVATE_KEY`,
-  used as the default credentials for any source repo.
-- **Multiple source orgs**: a `REPORTER_APPS` secret — a JSON object mapping
-  each source owner to its own `{app_id, private_key}`, with the default
-  pair as fallback (the same resolution order as `DISPATCH_APPS`).
+The CLI supports both models with the same secrets: per-source-owner
+credentials go in a `REPORTER_APPS` JSON object (mapping each source owner
+to its own `{app_id, private_key}`), with the
+`REPORTER_APP_ID`/`REPORTER_APP_PRIVATE_KEY` pair as the fallback for any
+owner not in the mapping — the same resolution order as `DISPATCH_APPS`.
 
-Pass them to `bump-images.yml` as the `reporter_app_id` /
-`reporter_app_private_key` / `reporter_apps` secrets — see
-[Bump images](workflows.md#bump-images). Reporting is best-effort: a failed
-report never fails the bump itself.
+### Token flow
 
 The token flow matches the dispatch flow, with the direction reversed and a
 narrower grant: `odp-releaser report-deployment` resolves the *source*
 owner's reporter credentials, finds the app's installation on the single
 source repo, and mints a one-hour token scoped to that repo with
-`permissions: {deployments: write}` — nothing else. It then creates the
-deployment at the payload's `git_sha` and sets its status (`success` for a
-direct commit, `queued` for a bump pull request that still needs review).
+`permissions: {deployments: write}` — nothing else. It then finds or creates
+the deployment at the payload's `git_sha` and sets its status (`success` for
+a direct commit, `queued` for a bump pull request that still needs review;
+[`report-merged.yml`](workflows.md#report-merged) flips `queued` to
+`success` when the bump PR merges).
 
 ### Future: PR comments (v2)
 

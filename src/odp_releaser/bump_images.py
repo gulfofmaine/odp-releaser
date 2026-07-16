@@ -11,6 +11,7 @@ from odp_releaser.logger import logger
 from odp_releaser.manifests.file import update_file_with_payload
 from odp_releaser.manifests.helm import update_helm_values_with_payload
 from odp_releaser.manifests.kustomize import update_kustomize_with_payload
+from odp_releaser.report_metadata import ReportMetadata, embed_metadata
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import ImageConfig, ManifestConfig
 
@@ -150,6 +151,8 @@ def bump_images(
 
     changed = False
     update_mode = "commit"
+    environment: str | None = None
+    environment_url: str | None = None
 
     if image_configs := config.images.get(payload.image_name):
         logger.debug("Configs for the image:")
@@ -173,6 +176,18 @@ def bump_images(
             )
         if "pull_request" in update_modes:
             update_mode = "pull_request"
+
+        environment = _resolve_report_setting(
+            filtered_configs, config.environment, "environment", payload.image_name
+        )
+        environment_url = _resolve_report_setting(
+            filtered_configs,
+            config.environment_url,
+            "environment_url",
+            payload.image_name,
+        )
+        if environment_url is not None:
+            environment_url = environment_url.format(**payload.value_format_kwargs())
 
         for image_config in filtered_configs:
             for kustomize_manifest in image_config.kustomize_manifests:
@@ -208,14 +223,21 @@ def bump_images(
 
     logger.info(f"Commit message: \n{'\n'.join(commit_message)}")
 
+    metadata = ReportMetadata(
+        environment=environment,
+        environment_url=environment_url,
+        client_payload=payload,
+    )
     sanitized_image_name = payload.image_name.replace("/", "-")
-    pr_title, pr_body = _pr_title_and_body(commit_message)
+    pr_title, pr_body = _pr_title_and_body(commit_message, metadata)
     write_github_output(
         {
             "changed": "true" if changed else "false",
             "image_name": payload.image_name,
             "digest": payload.digest,
             "update_mode": update_mode,
+            "environment": environment or "",
+            "environment_url": environment_url or "",
             "branch_name": f"odp-releaser/bump-{sanitized_image_name}",
             "commit_message": "\n".join(commit_message),
             "pr_title": pr_title,
@@ -225,19 +247,54 @@ def bump_images(
     write_step_summary(f"# {'\n'.join(commit_message)}")
 
 
-def _pr_title_and_body(commit_message: list[str]) -> tuple[str, str]:
+def _resolve_report_setting(
+    filtered_configs: list[ImageConfig],
+    default: str | None,
+    attr: str,
+    image_name: str,
+) -> str | None:
+    """Resolve a report setting across the matching configs.
+
+    Each config's own value falls back to the manifest-level ``default``. A
+    config that resolves to no value has no opinion; when the configs that do
+    have one disagree, warn and use the first in config order (mirroring the
+    mixed-``update_mode`` handling).
+    """
+    values = [
+        resolved
+        for image_config in filtered_configs
+        if (resolved := getattr(image_config, attr) or default) is not None
+    ]
+    if not values:
+        return default
+    if len(set(values)) > 1:
+        logger.warning(
+            f"Mixed {attr} values across matching configs for "
+            f"{image_name}: {sorted(set(values))}; using {values[0]!r}"
+        )
+    return values[0]
+
+
+def _pr_title_and_body(
+    commit_message: list[str], metadata: ReportMetadata
+) -> tuple[str, str]:
     """Derive a self-contained PR title/body pair from ``commit_message``.
 
     ``commit_message`` is always ``[title, "", "Triggered by ...", "", *body]``
     (see the assembly above), so the title is the first line and the body is
     everything after the blank separator line, with a trailing footer added so
-    the PR body stands on its own without any workflow-side templating.
+    the PR body stands on its own without any workflow-side templating. The
+    report ``metadata`` is appended as an invisible HTML comment so a
+    merge-time `report-deployment --pr-body` run can finish the deployment
+    report without any other context.
     """
     title = commit_message[0]
     body_lines = list(commit_message[2:])
     while body_lines and body_lines[-1] == "":
         body_lines.pop()
-    body_lines.extend(["", "Automated image bump by odp-releaser."])
+    body_lines.extend(
+        ["", "Automated image bump by odp-releaser.", "", embed_metadata(metadata)]
+    )
     return title, "\n".join(body_lines)
 
 

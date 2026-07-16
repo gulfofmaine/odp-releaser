@@ -157,8 +157,11 @@ ignore = [
 "noxfile.py" = ["T20"]
 # Typer resolves these Annotated option aliases at runtime (via
 # inspect.signature(eval_str=True)), so they must stay imported at module
-# scope and cannot move into a type-checking block.
+# scope and cannot move into a type-checking block. Same for pydantic
+# models resolving their field annotations at class-build time.
 "src/odp_releaser/make_payload.py" = ["TC001"]
+"src/odp_releaser/report_deployment.py" = ["TC001"]
+"src/odp_releaser/report_metadata.py" = ["TC001"]
 # PT028 assumes any ``test_*`` function is a pytest test; these CLI commands
 # are named ``test_notify``/``test_bump_images`` for the ``test notify``/
 # ``test bump-images`` subcommands, not pytest tests, so their Typer options

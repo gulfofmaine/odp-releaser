@@ -12,6 +12,7 @@ from odp_releaser.github import (
     create_deployment,
     create_deployment_status,
     installation_token_for,
+    list_deployments,
     pr_for_commit,
     resolve_app_credentials,
     resolve_reporter_credentials,
@@ -315,6 +316,35 @@ def test_create_deployment_status_posts_expected_body() -> None:
     )
     assert body["log_url"] == "https://github.com/acme/deploy-repo/actions/runs/99"
     assert body["description"] == "widgets:1.2.3 in acme/deploy-repo"
+
+
+def test_list_deployments_filters_by_sha_and_environment() -> None:
+    with respx.mock(base_url=API) as router:
+        route = router.get("/repos/acme/widgets/deployments").mock(
+            return_value=httpx.Response(200, json=[{"id": 99}, {"id": 42}])
+        )
+
+        ids = list_deployments(
+            "acme/widgets", sha="abc123", environment="production", token="ghs_test"
+        )
+
+    assert ids == [99, 42]
+    params = route.calls.last.request.url.params
+    assert params["sha"] == "abc123"
+    assert params["environment"] == "production"
+
+
+def test_list_deployments_empty() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/deployments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+
+        ids = list_deployments(
+            "acme/widgets", sha="abc123", environment="production", token="ghs_test"
+        )
+
+    assert ids == []
 
 
 def test_create_deployment_status_omits_unset_urls() -> None:

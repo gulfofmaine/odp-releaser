@@ -278,6 +278,22 @@ def create_deployment(
     return deployment_id
 
 
+def list_deployments(repo: str, *, sha: str, environment: str, token: str) -> list[int]:
+    """IDs of existing deployments on ``repo`` for ``sha`` + ``environment``.
+
+    ``repo`` is an ``owner/name`` slug. Returns ids newest first (the API's
+    default ordering), empty when nothing matches. Used to make reporting
+    idempotent: a merge-time report finds the deployment the bump created and
+    updates its status instead of piling up duplicates.
+    """
+    owner, _, name = repo.partition("/")
+    with GitHub(TokenAuthStrategy(token)) as github:
+        response = github.rest.repos.list_deployments(
+            owner, name, sha=sha, environment=environment
+        )
+    return [deployment["id"] for deployment in response.json()]
+
+
 def create_deployment_status(
     repo: str,
     deployment_id: int,

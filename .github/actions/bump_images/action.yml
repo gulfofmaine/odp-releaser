@@ -92,6 +92,21 @@ outputs:
       Update mode resolved from the image manifest config
       ("commit"/"pull_request").
     value: ${{ steps.bump.outputs.update_mode }}
+  environment:
+    description:
+      GitHub environment name resolved from the image manifest config for
+      deployment reporting; empty when unconfigured.
+    value: ${{ steps.bump.outputs.environment }}
+  environment_url:
+    description:
+      Deployment "View deployment" URL resolved (and templated) from the image
+      manifest config; empty when unconfigured.
+    value: ${{ steps.bump.outputs.environment_url }}
+  pull_request_url:
+    description:
+      URL of the bump pull request; empty unless a pull_request-mode bump opened
+      or updated one.
+    value: ${{ steps.pr.outputs.pull-request-url }}
   branch_name:
     description: Branch name used for pull_request mode.
     value: ${{ steps.bump.outputs.branch_name }}
@@ -159,6 +174,7 @@ runs:
         git push
 
     - name: Open bump pull request
+      id: pr
       if:
         inputs.dry_run != 'true' && inputs.stage_only != 'true' &&
         steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode

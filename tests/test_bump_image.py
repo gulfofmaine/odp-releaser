@@ -14,6 +14,7 @@ from odp_releaser.bump_image_tester import (
 )
 from odp_releaser.bump_images import bump_images
 from odp_releaser.main import app
+from odp_releaser.report_metadata import extract_metadata
 
 MANIFESTS_DIR = Path(__file__).parent / "manifests"
 
@@ -86,7 +87,17 @@ def test_success_path_writes_github_output(
     assert pr_body_lines[0] != ""
     assert "Triggered by" in outputs["pr_body"]
     assert str(client_payload.source.url) in outputs["pr_body"]
-    assert outputs["pr_body"].endswith("Automated image bump by odp-releaser.")
+    assert "Automated image bump by odp-releaser." in outputs["pr_body"]
+
+    # The report metadata rides along in the PR body so a merge-time
+    # `report-deployment --pr-body` run can finish the deployment report.
+    metadata = extract_metadata(outputs["pr_body"])
+    assert metadata is not None
+    assert metadata.client_payload == client_payload
+    assert metadata.environment is None
+    assert metadata.environment_url is None
+    assert outputs["environment"] == ""
+    assert outputs["environment_url"] == ""
 
 
 def test_dagster_helm_and_kustomize_dry_run(
@@ -120,7 +131,114 @@ def test_dagster_helm_and_kustomize_dry_run(
     assert not pr_body.startswith("\n")
     assert "Updated kustomize manifest" in pr_body
     assert "Updated helm values" in pr_body
-    assert pr_body.endswith("Automated image bump by odp-releaser.")
+    assert "Automated image bump by odp-releaser." in pr_body
+    assert extract_metadata(pr_body) is not None
+
+
+def test_environment_per_image_config_overrides_top_level(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+environment: staging
+environment_url: https://staging.example.com
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      environment: production
+      environment_url: https://mariners.example.com/{new_tag}
+    - events: [release]
+      environment: release-only
+"""
+    )
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+
+    bump_images(
+        config_path=config_path,
+        client_payload=client_payload.model_dump_json(),
+        dry_run=True,
+    )
+
+    outputs = _parse_github_output(output.read_text())
+    # Only the push config matches; its own values beat the top-level ones,
+    # and the URL is templated with the payload's values.
+    assert outputs["environment"] == "production"
+    expected_url = f"https://mariners.example.com/{client_payload.new_tag()}"
+    assert outputs["environment_url"] == expected_url
+    metadata = extract_metadata(outputs["pr_body"])
+    assert metadata is not None
+    assert metadata.environment == "production"
+    assert metadata.environment_url == expected_url
+
+
+def test_environment_falls_back_to_top_level(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+environment: staging
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+"""
+    )
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+
+    bump_images(
+        config_path=config_path,
+        client_payload=client_payload.model_dump_json(),
+        dry_run=True,
+    )
+
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["environment"] == "staging"
+    assert outputs["environment_url"] == ""
+
+
+def test_mixed_environments_warn_and_use_first(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      environment: production
+    - events: [push]
+      environment: staging
+"""
+    )
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+
+    with caplog.at_level(logging.WARNING):
+        bump_images(
+            config_path=config_path,
+            client_payload=client_payload.model_dump_json(),
+            dry_run=True,
+        )
+
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["environment"] == "production"
+    assert any(
+        "Mixed environment values" in record.message for record in caplog.records
+    )
 
 
 def test_unknown_image_fails(
