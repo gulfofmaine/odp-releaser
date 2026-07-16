@@ -40,8 +40,8 @@ description:
 inputs:
   client_payload:
     description: >-
-      repository_dispatch client_payload JSON produced by `odp-releaser
-      notify`. Provide either this or pr_body.
+      repository_dispatch client_payload JSON produced by `odp-releaser notify`.
+      Provide either this or pr_body.
     required: false
     default: ""
   pr_body:
@@ -53,8 +53,8 @@ inputs:
     default: ""
   update_mode:
     description: >-
-      How the bump landed ("commit" reports a success deployment,
-      "pull_request" reports a queued one).
+      How the bump landed ("commit" reports a success deployment, "pull_request"
+      reports a queued one).
     required: false
     default: commit
   environment:
