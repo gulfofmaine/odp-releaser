@@ -93,6 +93,29 @@ class ImageConfig(BaseModel):
             description="List of GitHub events for these manifests. Only these events will trigger updates. If `None`, all events trigger updates.",
         ),
     ] = None
+    environment: Annotated[
+        str | None,
+        Field(
+            description=(
+                "GitHub environment name reported back to the source repo "
+                "for this config's bumps (`report-deployment`). Overrides "
+                "the top-level environment; unset falls back to the deploy "
+                "repo's owner/name slug"
+            ),
+        ),
+    ] = None
+    environment_url: Annotated[
+        str | None,
+        Field(
+            description=(
+                "URL reported as the deployment's 'View deployment' link, "
+                "e.g. where this config's app runs. May reference "
+                "`{new_tag}`, `{git_sha}`, and `{digest}`. Overrides the "
+                "top-level environment_url; unset falls back to the bump "
+                "commit or pull request URL"
+            ),
+        ),
+    ] = None
     update_mode: Annotated[
         Literal["commit", "pull_request"],
         Field(
@@ -137,6 +160,30 @@ class ManifestConfig(BaseModel):
         ),
     ] = None
 
+    environment: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Default GitHub environment name used when reporting "
+                "deployments back to source repos (`report-deployment`). "
+                "Overridable per image config; unset falls back to this "
+                "deploy repo's owner/name slug"
+            ),
+        ),
+    ] = None
+
+    environment_url: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Default URL reported as the deployment's 'View deployment' "
+                "link. May reference `{new_tag}`, `{git_sha}`, and "
+                "`{digest}`. Overridable per image config; unset falls back "
+                "to the bump commit or pull request URL"
+            ),
+        ),
+    ] = None
+
     @classmethod
     def generate_yaml(cls) -> str:
         """Render the bundled :data:`EXAMPLE_MANIFEST` as commented YAML."""
@@ -149,6 +196,8 @@ EXAMPLE_MANIFEST = ManifestConfig(
             ImageConfig(
                 events=["publish"],
                 update_mode="pull_request",
+                environment="production",
+                environment_url="https://mariners.neracoos.org",
                 kustomize_manifests=[
                     KustomizeManifest(path=Path("../apps/mariners/kustomization.yaml")),
                 ],

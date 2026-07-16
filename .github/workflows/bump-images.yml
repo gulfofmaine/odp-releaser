@@ -13,6 +13,11 @@
 # Pushes/PRs authored with the default GITHUB_TOKEN do not trigger further
 # workflow runs by GitHub Actions design.
 #
+# When the source org's reporter-app credentials are supplied (via the
+# reporter_app_id / reporter_app_private_key secrets), a successful bump is
+# also reported back to the source repo as a GitHub deployment + status, so
+# the source PR timeline and Environments sidebar show where the image went.
+#
 # Minimal caller example:
 #
 #   on:
@@ -30,6 +35,9 @@
 #       secrets:
 #         ci_app_id: ${{ secrets.CI_APP_ID }}                   # optional
 #         ci_app_private_key: ${{ secrets.CI_APP_PRIVATE_KEY }} # optional
+#         reporter_apps: ${{ secrets.REPORTER_APPS }}           # optional
+#         reporter_app_id: ${{ secrets.REPORTER_APP_ID }}       # optional
+#         reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }} # optional
 
 name: Bump images
 
@@ -87,6 +95,16 @@ on:
       update_mode:
         description: Resolved update mode ("commit" or "pull_request").
         value: ${{ jobs.bump.outputs.update_mode }}
+      environment:
+        description: >-
+          GitHub environment name resolved from the image manifest config for
+          deployment reporting; empty when unconfigured.
+        value: ${{ jobs.bump.outputs.environment }}
+      environment_url:
+        description: >-
+          Deployment "View deployment" URL resolved from the image manifest
+          config; empty when unconfigured.
+        value: ${{ jobs.bump.outputs.environment_url }}
       branch_name:
         description: Branch name a pull_request-mode bump uses.
         value: ${{ jobs.bump.outputs.branch_name }}
@@ -105,6 +123,21 @@ on:
       ci_app_private_key:
         description: Optional private key matching ci_app_id.
         required: false
+      reporter_apps:
+        description: >-
+          Optional JSON object mapping source owner -> {app_id, private_key}
+          reporter app credentials, for deploy repos that receive dispatches
+          from multiple source orgs.
+        required: false
+      reporter_app_id:
+        description: >-
+          Optional App ID of the source org's reporter GitHub App. When set
+          (with reporter_app_private_key), a successful bump is reported back to
+          the source repo as a GitHub deployment + status.
+        required: false
+      reporter_app_private_key:
+        description: Optional private key matching reporter_app_id.
+        required: false
 
 permissions: {}
 
@@ -117,6 +150,8 @@ jobs:
       pull-requests: write # open the bump pull request
     env:
       HAS_CI_APP: ${{ secrets.ci_app_id != '' }}
+      HAS_REPORTER_APP:
+        ${{ secrets.reporter_app_id != '' || secrets.reporter_apps != '' }}
     concurrency:
       # client_payload.image_name is empty when this workflow is called
       # outside a repository_dispatch run (e.g. this repo's e2e CI); fall
@@ -130,6 +165,8 @@ jobs:
       digest: ${{ steps.bump.outputs.digest }}
       changed: ${{ steps.bump.outputs.changed }}
       update_mode: ${{ steps.bump.outputs.update_mode }}
+      environment: ${{ steps.bump.outputs.environment }}
+      environment_url: ${{ steps.bump.outputs.environment_url }}
       branch_name: ${{ steps.bump.outputs.branch_name }}
       commit_message: ${{ steps.bump.outputs.commit_message }}
       pr_title: ${{ steps.bump.outputs.pr_title }}
@@ -187,3 +224,38 @@ jobs:
           git_user_email: ${{ inputs.git_user_email }}
           dry_run: ${{ inputs.dry_run }}
           token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Bump commit URL
+        # The bump_images action pushed the commit, so HEAD is the bump
+        # commit; capture its URL as the deployment's "View deployment" link
+        # fallback for commit-mode bumps.
+        id: commit-url
+        if:
+          env.HAS_REPORTER_APP == 'true' && inputs.dry_run != true &&
+          steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
+          == 'commit'
+        run: |
+          printf 'url=%s/%s/commit/%s\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$(git rev-parse HEAD)" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Report deployment to source repo
+        # Best effort: a failed report never fails the bump itself.
+        if:
+          env.HAS_REPORTER_APP == 'true' && inputs.dry_run != true &&
+          steps.bump.outputs.changed == 'true'
+        continue-on-error: true
+        uses: ./.odp-releaser/.github/actions/report_deployment
+        with:
+          client_payload:
+            ${{ inputs.client_payload || toJSON(github.event.client_payload) }}
+          update_mode: ${{ steps.bump.outputs.update_mode }}
+          environment: ${{ steps.bump.outputs.environment }}
+          environment_url:
+            ${{ steps.bump.outputs.environment_url ||
+            steps.bump.outputs.pull_request_url || steps.commit-url.outputs.url
+            }}
+          verbosity: ${{ inputs.verbosity }}
+          reporter_apps: ${{ secrets.reporter_apps }}
+          reporter_app_id: ${{ secrets.reporter_app_id }}
+          reporter_app_private_key: ${{ secrets.reporter_app_private_key }}

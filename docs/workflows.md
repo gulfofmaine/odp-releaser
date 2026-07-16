@@ -4,13 +4,14 @@ icon: lucide/workflow
 
 # Reusable Workflows
 
-`odp-releaser` ships two reusable GitHub Actions workflows that together move
-a container image from a **source** repo (builds and pushes the image) to any
-number of **deploy** repos (own the Kubernetes/Kustomize/Helm manifests that
-reference it). Both are called with the
+`odp-releaser` ships three reusable GitHub Actions workflows that together
+move a container image from a **source** repo (builds and pushes the image)
+to any number of **deploy** repos (own the Kubernetes/Kustomize/Helm
+manifests that reference it) — and report back where it went. All are called
+with the
 [cross-repo `uses:` syntax](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#calling-a-reusable-workflow)
-and both install the `odp-releaser` CLI to do the actual work. The install
-and bump steps are themselves packaged as
+and all install the `odp-releaser` CLI to do the actual work. The install,
+bump, and report steps are themselves packaged as
 [composite actions](actions.md) that the workflows dog-food — use those
 directly when you need to add your own steps around the bump.
 
@@ -40,13 +41,17 @@ sequenceDiagram
     else update_mode: pr
         Deploy->>Deploy: open a pull request
     end
+    opt reporter app configured
+        Deploy->>Source: deployment + status at built commit
+        Deploy->>Source: bump PR merge flips queued deployment to success
+    end
     Deploy->>Argo: new manifests available
     Argo->>Argo: sync manifests to the cluster
 ```
 
-Everything below documents the two jobs in that diagram. The GitHub App
-machinery that makes the cross-repo dispatch possible is covered separately
-in [GitHub Apps](github_apps.md).
+Everything below documents the jobs in that diagram. The GitHub App
+machinery that makes the cross-repo dispatch and deployment reporting
+possible is covered separately in [GitHub Apps](github_apps.md).
 
 ## Notify
 
@@ -182,6 +187,9 @@ jobs:
     secrets:
       ci_app_id: ${{ secrets.CI_APP_ID }} # optional
       ci_app_private_key: ${{ secrets.CI_APP_PRIVATE_KEY }} # optional
+      reporter_app_id: ${{ secrets.REPORTER_APP_ID }} # optional
+      reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }} # optional
+      # reporter_apps: ${{ secrets.REPORTER_APPS }}    # optional multi-org
 ```
 
 Set the `concurrency` group at the **caller** level too (as above) — a burst
@@ -208,6 +216,9 @@ succession.
 | --- | --- | --- |
 | `ci_app_id` | no | App ID of this repo's own GitHub App. When set, the commit/PR is authored with an app token instead of `GITHUB_TOKEN`. |
 | `ci_app_private_key` | no | Private key matching `ci_app_id`. |
+| `reporter_app_id` | no | App ID of the source org's reporter GitHub App. When set, a successful bump is reported back to the source repo as a GitHub deployment + status. |
+| `reporter_app_private_key` | no | Private key matching `reporter_app_id`. |
+| `reporter_apps` | no | JSON object mapping source `owner -> {app_id, private_key}` for reporting to source repos across multiple orgs. |
 
 ### Outputs
 
@@ -217,6 +228,8 @@ succession.
 | `digest` | Digest (`sha256:...`) of the image the bump ran for. |
 | `changed` | Whether any manifest content changed (`"true"`/`"false"`). |
 | `update_mode` | Resolved update mode (`"commit"` or `"pull_request"`). |
+| `environment` | GitHub environment name resolved from the image manifest config for deployment reporting; empty when unconfigured. |
+| `environment_url` | Deployment "View deployment" URL resolved from the image manifest config; empty when unconfigured. |
 | `branch_name` | Branch name a `pull_request`-mode bump uses (`odp-releaser/bump-<image_name>`). |
 | `commit_message` | Full commit message for the bump. |
 | `pr_title` | Title for the bump pull request. |
@@ -253,6 +266,41 @@ checked-out branch (normally the default branch); in `pull_request` mode it
 opens (or updates) a pull request on a stable branch named
 `odp-releaser/bump-<image_name>` via `peter-evans/create-pull-request`.
 
+### Reporting deployments back to the source repo
+
+When the `reporter_app_id` / `reporter_app_private_key` (or `reporter_apps`)
+secrets are set, the [`report_deployment` composite
+action](actions.md#report_deployment) runs after a successful bump. It
+creates a
+[GitHub deployment](https://docs.github.com/en/rest/deployments/deployments)
+on the **source** repository at the commit that built the image
+(`client_payload.git_sha`) and sets its status, so the source repo's pull
+request timeline and Environments sidebar show where the image went.
+
+- The deployment **state** mirrors what happened on the deploy side:
+  `success` when the bump was committed directly, `queued` when a bump pull
+  request was opened but not yet merged — call
+  [`report-merged.yml`](#report-merged) from the deploy repo to flip it to
+  `success` once the bump PR merges. Note this records that the manifest
+  change landed — whether ArgoCD has synced it to a cluster is downstream of
+  this tool.
+- The **environment name** defaults to the deploy repo's `owner/name` slug;
+  set `environment` in `.github/image_manifest.yaml` — per image config, or
+  at the top level as a repo-wide default — to override it (see
+  [Image manifest config](config/image_manifest.md)).
+- The **"View deployment" link** defaults to the bump commit (`commit` mode)
+  or the bump pull request (`pull_request` mode); set `environment_url` in
+  the image manifest config — again per image config or top-level — to point
+  it at the running app instead (templated with `{new_tag}`, `{git_sha}`,
+  and `{digest}`). The logs link points at the bump workflow run.
+- Reporting is **best-effort**: the step runs with `continue-on-error`, so a
+  failed report never fails the bump itself.
+
+The credentials belong to a **reporter app** with `Deployments: Read and
+write` installed on the source repos — normally a single app owned by the
+deploy org and installed by each source org. See
+[GitHub Apps](github_apps.md#reporter-apps) for how to set one up.
+
 ### The `ci_app_*` PR-CI-triggering note
 
 GitHub Actions deliberately does not trigger further workflow runs from a
@@ -264,6 +312,63 @@ deploy org's own dispatch app credentials — makes the workflow mint that
 token before checkout, so the pushed commit and/or opened PR is authored by
 your app and does trigger CI. See [GitHub Apps](github_apps.md#5-wire-your-own-app-into-bump-imagesyml-pr-mode-ci-trigger)
 for how to obtain and wire those credentials.
+
+## Report merged
+
+Runs in the **deploy** repo when a pull request closes. A `pull_request`-mode
+bump reports its deployment to the source repo as `queued` — nothing is live
+until the bump PR merges. This workflow un-queues it: it reads the report
+metadata that `bump-images` embedded in the PR body (an invisible HTML
+comment carrying the client payload, environment, and environment URL),
+finds the queued deployment on the source repo for the same commit and
+environment, and flips its status to `success`.
+
+Deploy repos whose images all use `update_mode: commit` don't need this
+workflow — commit-mode bumps report `success` immediately.
+
+### Caller example
+
+```yaml
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  report:
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'odp-releaser/')
+    uses: gulfofmaine/odp-releaser/.github/workflows/report-merged.yml@<sha-or-tag>
+    secrets:
+      reporter_app_id: ${{ secrets.REPORTER_APP_ID }}
+      reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }}
+      # reporter_apps: ${{ secrets.REPORTER_APPS }}  # optional multi-org
+```
+
+The `if:` gate matches merged pull requests on the stable
+`odp-releaser/bump-<image_name>` branches that `bump-images` uses. A PR
+without embedded odp-releaser metadata is a friendly no-op (the job logs
+"nothing to report" and succeeds), so a broader gate is safe — the branch
+prefix check just avoids spinning up jobs for unrelated PRs.
+
+If a merged bump PR's report is ever missed (e.g. the secrets weren't
+configured yet), re-running is safe: reporting is idempotent, reusing the
+existing deployment for the same commit + environment rather than creating
+duplicates.
+
+### Inputs
+
+| Input | Required | Default | Description |
+| --- | --- | --- | --- |
+| `verbosity` | no | `1` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
+
+### Secrets
+
+| Secret | Required | Description |
+| --- | --- | --- |
+| `reporter_app_id` | no | App ID of the reporter GitHub App installed on the source repos. |
+| `reporter_app_private_key` | no | Private key matching `reporter_app_id`. |
+| `reporter_apps` | no | JSON object mapping source `owner -> {app_id, private_key}` for reporting to source repos across multiple orgs. |
 
 ## Versioning and pinning
 

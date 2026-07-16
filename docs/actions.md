@@ -4,23 +4,25 @@ icon: lucide/blocks
 
 # Composite Actions
 
-Alongside the [reusable workflows](workflows.md), `odp-releaser` ships two
+Alongside the [reusable workflows](workflows.md), `odp-releaser` ships three
 composite GitHub Actions for deploy repos that need more control than
 `bump-images.yml` offers — most commonly to run extra steps *after* the bump
 (e.g. syncing the freshly published image to another registry) before
-anything is committed.
+anything is committed, or to report deployments back to source repos from a
+custom workflow.
 
-Both actions live in this repo and are referenced with the standard
+The actions live in this repo and are referenced with the standard
 `owner/repo/path@ref` syntax:
 
 ```yaml
 uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
 uses: gulfofmaine/odp-releaser/.github/actions/bump_images@<sha-or-tag>
+uses: gulfofmaine/odp-releaser/.github/actions/report_deployment@<sha-or-tag>
 ```
 
-`bump-images.yml` and `notify.yml` use these same actions internally, checked
-out at `${{ job.workflow_sha }}` so the actions (and the CLI they install)
-always match the workflow ref the caller pinned.
+The reusable workflows use these same actions internally, checked out at
+`${{ job.workflow_sha }}` so the actions (and the CLI they install) always
+match the workflow ref the caller pinned.
 
 ## `install`
 
@@ -130,7 +132,85 @@ jobs:
 | `digest` | Digest (`sha256:...`) of the image the bump ran for. |
 | `changed` | Whether any manifests changed (`"true"`/`"false"`). |
 | `update_mode` | Update mode resolved from the image manifest config (`"commit"`/`"pull_request"`). |
+| `environment` | GitHub environment name resolved from the image manifest config for deployment reporting; empty when unconfigured. |
+| `environment_url` | Deployment "View deployment" URL resolved (and templated) from the image manifest config; empty when unconfigured. |
+| `pull_request_url` | URL of the bump pull request; empty unless a `pull_request`-mode bump opened or updated one. |
 | `branch_name` | Branch name used for `pull_request` mode. |
 | `commit_message` | Generated commit message for the bump. |
 | `pr_title` | Generated pull request title for the bump. |
-| `pr_body` | Generated pull request body for the bump. |
+| `pr_body` | Generated pull request body for the bump (includes the embedded [report metadata](#report_deployment)). |
+
+## `report_deployment`
+
+Runs `odp-releaser report-deployment`, which creates (or finds) a
+[GitHub deployment](https://docs.github.com/en/rest/deployments/deployments)
+on the **source** repository at the commit that built the image and sets its
+status — `success` for a bump committed directly, `queued` for a bump pull
+request that still needs review. `bump-images.yml` runs this action after a
+successful bump, and `report-merged.yml` runs it when a bump PR merges; use
+it directly when composing your own workflow from the `bump_images` action.
+
+Provide exactly one of:
+
+- `client_payload` — right after a bump, the same payload the bump ran with;
+- `pr_body` — after a bump pull request closed, the body of that PR. The
+  payload, environment, and environment URL that `bump_images` embedded in
+  the body at bump time are read back out, and the queued deployment from
+  the bump is found (same commit + environment) and updated instead of a
+  duplicate being created. A body without embedded metadata is a friendly
+  no-op, so running on any closed PR is safe.
+
+Prerequisites:
+
+- The `odp-releaser` CLI is on the PATH — run the `install` action first
+  (same sibling-action composition as `bump_images`).
+- Reporter app credentials for the source org — see
+  [GitHub Apps](github_apps.md#reporter-apps). The minted token is scoped to
+  the single source repository with `deployments: write` only.
+
+A failed report exits non-zero and fails the step; wrap the action in
+`continue-on-error: true` (as `bump-images.yml` does) when reporting should
+be best-effort rather than a hard failure.
+
+```yaml
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  report:
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'odp-releaser/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install ODP Releaser
+        uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
+
+      - name: Report merged deployment
+        uses: gulfofmaine/odp-releaser/.github/actions/report_deployment@<sha-or-tag>
+        with:
+          pr_body: ${{ github.event.pull_request.body }}
+          environment_url: >-
+            ${{ github.server_url }}/${{ github.repository }}/commit/${{
+            github.event.pull_request.merge_commit_sha }}
+          reporter_app_id: ${{ secrets.REPORTER_APP_ID }}
+          reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }}
+```
+
+(That example is exactly what [`report-merged.yml`](workflows.md#report-merged)
+packages up — prefer the reusable workflow unless you need to customize it.)
+
+### Inputs
+
+| Input | Required | Default | Description |
+| --- | --- | --- | --- |
+| `client_payload` | one of these | `""` | `repository_dispatch` client_payload JSON produced by `odp-releaser notify`. |
+| `pr_body` | one of these | `""` | Body of a merged bump pull request carrying the embedded report metadata. |
+| `update_mode` | no | `commit` | How the bump landed: `commit` reports a `success` deployment, `pull_request` reports a `queued` one. |
+| `environment` | no | `""` | GitHub environment name for the deployment. An environment embedded in `pr_body` wins; empty falls back to the deploy repo's `owner/name` slug. |
+| `environment_url` | no | `""` | "View deployment" link for the deployment status — typically the bump commit or pull request URL. A URL embedded in `pr_body` wins. |
+| `verbosity` | no | `"1"` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
+| `reporter_apps` | no | `""` | JSON object mapping source `owner -> {app_id, private_key}` reporter app credentials, for deploy repos that report to multiple source orgs. |
+| `reporter_app_id` | no | `""` | App ID of the reporter GitHub App installed on the source repos. |
+| `reporter_app_private_key` | no | `""` | Private key matching `reporter_app_id`. |

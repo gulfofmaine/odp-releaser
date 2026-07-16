@@ -1,0 +1,121 @@
+# Composite action: report a completed image bump back to the source repo.
+#
+# Runs `odp-releaser report-deployment`, which creates (or finds) a GitHub
+# deployment on the *source* repository at the commit that built the image
+# and sets its status: `success` for a bump committed directly, `queued` for
+# a bump pull request that still needs review. Reporting is idempotent — an
+# existing deployment for the same commit + environment has its status
+# updated, which is how a merge-time run (`pr_body`) flips the bump PR's
+# queued deployment to success.
+#
+# Provide exactly one of `client_payload` (right after a bump) or `pr_body`
+# (after a bump pull request merged; the payload embedded at bump time is
+# read back out of the body). A `pr_body` without embedded odp-releaser
+# metadata is a friendly no-op, so it's safe to run on any closed PR.
+#
+# Prerequisites:
+#   - The `odp-releaser` CLI is on the PATH — run the sibling `install`
+#     action first. (A composite action cannot reference a sibling local
+#     action itself: relative `uses:` paths resolve against the workflow's
+#     workspace, not the action's repo — see actions/runner#1348.)
+#   - Reporter app credentials for the source org — see the GitHub Apps docs.
+#
+# Minimal caller example:
+#
+#   - name: Install ODP Releaser
+#     uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
+#
+#   - name: Report deployment
+#     uses: gulfofmaine/odp-releaser/.github/actions/report_deployment@<sha-or-tag>
+#     with:
+#       update_mode: ${{ steps.bump.outputs.update_mode }}
+#       reporter_app_id: ${{ secrets.REPORTER_APP_ID }}
+#       reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }}
+
+name: Report deployment
+description:
+  Report a completed image bump back to the source repo as a GitHub deployment
+  and status.
+
+inputs:
+  client_payload:
+    description: >-
+      repository_dispatch client_payload JSON produced by `odp-releaser notify`.
+      Provide either this or pr_body.
+    required: false
+    default: ""
+  pr_body:
+    description: >-
+      Body of a merged bump pull request; the payload, environment, and
+      environment URL embedded at bump time are read from it. Provide either
+      this or client_payload. A body without embedded metadata is a no-op.
+    required: false
+    default: ""
+  update_mode:
+    description: >-
+      How the bump landed ("commit" reports a success deployment, "pull_request"
+      reports a queued one).
+    required: false
+    default: commit
+  environment:
+    description: >-
+      GitHub environment name for the deployment. An environment embedded in
+      pr_body wins; empty falls back to the deploy repo's owner/name slug.
+    required: false
+    default: ""
+  environment_url:
+    description: >-
+      "View deployment" link for the deployment status — typically the bump
+      commit or pull request URL. A URL embedded in pr_body wins.
+    required: false
+    default: ""
+  verbosity:
+    description: >-
+      CLI verbosity: 0=warning, 1=info (default), 2 or more=debug. Maps to the
+      CLI's -v/-vv/-vvv flags (capped at 3).
+    required: false
+    default: "1"
+  reporter_apps:
+    description: >-
+      JSON object mapping source owner -> {app_id, private_key} reporter app
+      credentials, for deploy repos that report to multiple source orgs.
+    required: false
+    default: ""
+  reporter_app_id:
+    description: >-
+      App ID of the reporter GitHub App installed on the source repos.
+    required: false
+    default: ""
+  reporter_app_private_key:
+    description: Private key matching reporter_app_id.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Report deployment
+      shell: bash
+      env:
+        CLIENT_PAYLOAD: ${{ inputs.client_payload }}
+        PR_BODY: ${{ inputs.pr_body }}
+        UPDATE_MODE: ${{ inputs.update_mode }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        ENVIRONMENT_URL: ${{ inputs.environment_url }}
+        VERBOSITY: ${{ inputs.verbosity }}
+        REPORTER_APPS: ${{ inputs.reporter_apps }}
+        REPORTER_APP_ID: ${{ inputs.reporter_app_id }}
+        REPORTER_APP_PRIVATE_KEY: ${{ inputs.reporter_app_private_key }}
+      run: |
+        if ! command -v odp-releaser >/dev/null; then
+          echo "::error::odp-releaser CLI not found on the PATH; run the" \
+            "gulfofmaine/odp-releaser/.github/actions/install action first"
+          exit 1
+        fi
+        case "$VERBOSITY" in
+          0) FLAGS=() ;;
+          1) FLAGS=(-v) ;;
+          2) FLAGS=(-vv) ;;
+          *) FLAGS=(-vvv) ;;
+        esac
+        odp-releaser "${FLAGS[@]}" report-deployment

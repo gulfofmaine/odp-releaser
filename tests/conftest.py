@@ -19,6 +19,13 @@ def rsa_private_key() -> str:
 
 @pytest.fixture(autouse=True)
 def _clear_dispatch_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure dispatch credential env vars never leak in from the host."""
-    for name in ("DISPATCH_APPS", "DISPATCH_APP_ID", "DISPATCH_APP_PRIVATE_KEY"):
+    """Ensure app credential env vars never leak in from the host."""
+    for name in (
+        "DISPATCH_APPS",
+        "DISPATCH_APP_ID",
+        "DISPATCH_APP_PRIVATE_KEY",
+        "REPORTER_APPS",
+        "REPORTER_APP_ID",
+        "REPORTER_APP_PRIVATE_KEY",
+    ):
         monkeypatch.delenv(name, raising=False)
