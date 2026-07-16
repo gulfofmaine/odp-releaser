@@ -10,6 +10,7 @@ docs_dir = "docs"
 nav = [
     "index.md",
     "workflows.md",
+    "actions.md",
     "github_apps.md",
     "cli.md",
     { "Config" = [

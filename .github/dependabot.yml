@@ -1,8 +1,12 @@
 version: 2
 updates:
   # Maintain dependencies for GitHub Actions
+  # "/" only covers .github/workflows; the composite actions' pins live in
+  # .github/actions/*/action.yml and need their own directory entries.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "monthly"
     cooldown:

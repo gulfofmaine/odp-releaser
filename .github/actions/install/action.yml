@@ -1,0 +1,51 @@
+# Composite action: install the odp-releaser CLI.
+#
+# Installs the CLI from this action's own repository files, so the CLI version
+# always matches the ref the action was referenced at — pinning the action
+# reference is enough to pin the CLI too, with no separate version input to
+# keep in sync.
+#
+# Minimal caller example:
+#
+#   - name: Install ODP Releaser
+#     uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
+#     # with:
+#     #   install_uv: "false" # if the job already provides uv on the PATH
+
+name: Install ODP Releaser
+description:
+  Install uv (optional) and the odp-releaser CLI from this action's repository.
+
+inputs:
+  install_uv:
+    description: >-
+      Whether to install uv with astral-sh/setup-uv. Set to "false" when the job
+      already provides uv on the PATH.
+    required: false
+    default: "true"
+  cache_suffix:
+    description: >-
+      Suffix for setup-uv's cache key, used to keep the uv cache keyed to the
+      odp-releaser version being installed. Defaults to the ref this action was
+      referenced at. Only used when install_uv is "true".
+    required: false
+    default: odp-releaser-${{ github.action_ref }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      if: inputs.install_uv == 'true'
+      uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+      with:
+        enable-cache: true
+        cache-dependency-glob: ""
+        cache-suffix: ${{ inputs.cache_suffix }}
+        prune-cache: false
+
+    - name: Install ODP Releaser
+      # GITHUB_ACTION_PATH is this action's directory; three levels up is the
+      # repo root, which is installable without git metadata because the
+      # project uses a static version.
+      shell: bash
+      run: uv tool install "$GITHUB_ACTION_PATH/../../.."

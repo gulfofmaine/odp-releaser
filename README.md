@@ -46,6 +46,11 @@ The deploy repos have a reusable `bump-images` workflow triggered by that
 manifests need to be updated, checks the source repo against an optional
 allow-list, and either commits the change directly or opens a pull request.
 
+The workflows are built from composite actions (`install` and `bump_images`)
+that deploy repos can also use directly — including a `stage_only` mode that
+writes and stages the manifest changes without committing, so custom steps (like
+syncing the image to another registry) can run before the commit.
+
 See the [docs](https://gulfofmaine.github.io/odp-releaser/) for the full
-workflow reference, the `client_payload`/manifest config schemas, and how to set
-up the GitHub Apps that authenticate the dispatch.
+workflow and action reference, the `client_payload`/manifest config schemas, and
+how to set up the GitHub Apps that authenticate the dispatch.
