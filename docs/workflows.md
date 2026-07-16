@@ -89,6 +89,8 @@ above.
 | `environment` | no | `""` | GitHub environment used to gate the dispatch behind protection rules. Empty means no gating. |
 | `deploy_targets_path` | no | `.github/deploy_targets.yaml` | Path to the deploy-targets file in the calling repo. |
 | `verbosity` | no | `1` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
+| `dry_run` | no | `false` | Testing aid: resolve dispatch credentials for every target but send no dispatch events. |
+| `event_name` | no | `""` | Testing aid: override the GitHub event name used to build the client payload. Empty uses the run's real event. Only `push`, `release`, and `workflow_dispatch` are supported; `workflow_dispatch` is the simplest override since it needs no event file, token, or PR lookup. |
 
 ### Secrets
 
@@ -100,6 +102,13 @@ above.
 
 See [GitHub Apps](github_apps.md) for where these credentials come from and
 how to request them from a deploy org.
+
+### Outputs
+
+| Output | Description |
+| --- | --- |
+| `results` | JSON array of per-target dispatch results, each `{owner, repo, event_type, ok, detail}`. |
+| `target_count` | Number of deploy targets that were attempted. |
 
 ### The protected `environment` gate
 
@@ -132,9 +141,10 @@ Each entry:
 | `event_type` | no | `image-published` | `repository_dispatch` event type to send. |
 
 A missing file is an error: `notify` exits non-zero and suggests generating
-one with `odp-releaser generate-config deploy-targets`. An existing file that
-is empty or contains an empty array is a valid no-op — `notify` logs that
-there's nothing to dispatch and exits successfully.
+one with `odp-releaser generate-config deploy-targets`. A file that is empty
+or contains an empty array is also an error — a targets file with nothing to
+dispatch to is treated as a misconfiguration rather than a silent no-op, so
+`notify` exits non-zero.
 
 ## Bump images
 
@@ -186,6 +196,8 @@ succession.
 | `git_user_name` | no | `odp-releaser[bot]` | Git author/committer name for direct commits. |
 | `git_user_email` | no | `odp-releaser[bot]@users.noreply.github.com` | Git author/committer email for direct commits. |
 | `verbosity` | no | `1` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
+| `client_payload` | no | `""` | Testing aid: explicit `client_payload` JSON string. Empty uses the triggering `repository_dispatch` event's payload. |
+| `dry_run` | no | `false` | Testing aid: run the CLI with `--dry-run` (no manifest files written) and skip the commit and pull-request steps. Outputs are still produced. |
 
 ### Secrets
 
@@ -193,6 +205,16 @@ succession.
 | --- | --- | --- |
 | `ci_app_id` | no | App ID of this repo's own GitHub App. When set, the commit/PR is authored with an app token instead of `GITHUB_TOKEN`. |
 | `ci_app_private_key` | no | Private key matching `ci_app_id`. |
+
+### Outputs
+
+| Output | Description |
+| --- | --- |
+| `changed` | Whether any manifest content changed (`"true"`/`"false"`). |
+| `update_mode` | Resolved update mode (`"commit"` or `"pull_request"`). |
+| `branch_name` | Branch name a `pull_request`-mode bump uses (`odp-releaser/bump-<image_name>`). |
+| `commit_message` | Full commit message for the bump. |
+| `pr_title` | Title for the bump pull request. |
 
 ### `commit` vs `pull_request`
 
@@ -226,6 +248,33 @@ file that GitHub resolved for this run. That keeps the workflow YAML and the
 CLI it invokes permanently in lockstep: pinning the workflow reference is
 enough to pin the CLI version too, with no separate version input to keep in
 sync.
+
+## Self-testing (e2e CI)
+
+This repo's own CI (`.github/workflows/ci.yml`) exercises both reusable
+workflows end-to-end on every pull request, using the testing-aid inputs
+documented above:
+
+- `e2e-notify` calls `notify.yml` with `dry_run: true`,
+  `event_name: workflow_dispatch`, dummy dispatch credentials, and the
+  fixture targets in `tests/e2e/deploy_targets.yaml`. Credentials are
+  resolved for every target but nothing is dispatched; the job fails if any
+  target's credentials can't be resolved, and its `results`/`target_count`
+  outputs are asserted downstream.
+- `e2e-payload` installs the CLI from the PR's checkout and generates real
+  client payloads with `odp-releaser test make-payload`.
+- `e2e-bump-commit` / `e2e-bump-pr` call `bump-images.yml` with those
+  payloads, `dry_run: true`, and the fixture config in
+  `tests/e2e/image_manifest.yaml` (one image per update mode, covering both
+  kustomize pin styles).
+- `e2e-assert` checks the workflows' outputs: notify's `results` (both
+  targets attempted, all ok, dry-run detail) and `target_count`, plus
+  bump-images' `changed`, `update_mode`, `commit_message`, `pr_title`, and
+  `branch_name`.
+
+Because the reusable workflows are called locally (`uses: ./.github/...`),
+each PR run also proves the real `uv tool install git+...@<workflow sha>`
+install path against the PR's own commit.
 
 ## `client_payload.repo` and `allowed_source_repos`
 

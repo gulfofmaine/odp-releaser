@@ -62,6 +62,32 @@ on:
         required: false
         type: number
         default: 1
+      dry_run:
+        description: >-
+          Resolve dispatch credentials for every target but send no dispatch
+          events. Testing aid; used by this repo's own e2e CI.
+        required: false
+        type: boolean
+        default: false
+      event_name:
+        description: >-
+          Override the GitHub event name used to build the client payload
+          (testing aid). Empty (the default) uses the run's real event. Only
+          push, release, and workflow_dispatch are supported by the payload
+          builder; workflow_dispatch is the simplest override as it needs no
+          event file, token, or pull request lookup.
+        required: false
+        type: string
+        default: ""
+    outputs:
+      results:
+        description: >-
+          JSON array of per-target dispatch results, each {owner, repo,
+          event_type, ok, detail}.
+        value: ${{ jobs.notify.outputs.results }}
+      target_count:
+        description: Number of deploy targets that were attempted.
+        value: ${{ jobs.notify.outputs.target_count }}
     secrets:
       dispatch_app_id:
         description:
@@ -89,6 +115,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read # odp-releaser reads PR metadata for the dispatch payload
+    outputs:
+      results: ${{ steps.notify.outputs.results }}
+      target_count: ${{ steps.notify.outputs.target_count }}
     steps:
       - name: Checkout calling repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -112,6 +141,7 @@ jobs:
           git+https://github.com/gulfofmaine/odp-releaser.git@${ODP_RELEASER_REF}
 
       - name: Notify deploy targets
+        id: notify
         env:
           IMAGE_NAME: ${{ inputs.image_name }}
           TAG: ${{ inputs.tag }}
@@ -122,6 +152,8 @@ jobs:
           DISPATCH_APP_PRIVATE_KEY: ${{ secrets.dispatch_app_private_key }}
           DISPATCH_APPS: ${{ secrets.dispatch_apps }}
           VERBOSITY: ${{ inputs.verbosity }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          EVENT_NAME_OVERRIDE: ${{ inputs.event_name }}
         run: |
           case "$VERBOSITY" in
             0) FLAGS=() ;;
@@ -129,4 +161,12 @@ jobs:
             2) FLAGS=(-vv) ;;
             *) FLAGS=(-vvv) ;;
           esac
-          odp-releaser "${FLAGS[@]}" notify "$IMAGE_NAME" "$TAG" "$DIGEST"
+          NOTIFY_ARGS=()
+          if [ "$DRY_RUN" = "true" ]; then
+            NOTIFY_ARGS+=(--dry-run)
+          fi
+          if [ -n "$EVENT_NAME_OVERRIDE" ]; then
+            NOTIFY_ARGS+=(--github-event-name "$EVENT_NAME_OVERRIDE")
+          fi
+          odp-releaser "${FLAGS[@]}" notify "$IMAGE_NAME" "$TAG" "$DIGEST" \
+            "${NOTIFY_ARGS[@]}"
