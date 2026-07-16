@@ -1,0 +1,175 @@
+# Composite action: bump image references in the checked-out deploy repo.
+#
+# Runs `odp-releaser bump-images` against the incoming client_payload and the
+# repo's image manifest config, then — depending on the image's update_mode —
+# commits the change directly or opens a pull request. Set `stage_only: true`
+# to instead write the manifest changes and `git add` them without committing,
+# so the calling workflow can layer follow-up steps (e.g. syncing the image to
+# another registry) on top of the staged bump before committing itself.
+#
+# Prerequisites:
+#   - The deploy repo is checked out, with credentials that can push unless
+#     stage_only is "true".
+#   - The `odp-releaser` CLI is on the PATH — run the sibling `install`
+#     action first. (A composite action cannot reference a sibling local
+#     action itself: relative `uses:` paths resolve against the workflow's
+#     workspace, not the action's repo — see actions/runner#1348.)
+#
+# Minimal caller example:
+#
+#   - name: Install ODP Releaser
+#     uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
+#
+#   - name: Bump images
+#     id: bump
+#     uses: gulfofmaine/odp-releaser/.github/actions/bump_images@<sha-or-tag>
+#     # with:
+#     #   stage_only: "true" # write + `git add` only; no commit, no PR
+
+name: Bump images
+description:
+  Bump image references in deployment manifests, then commit, open a PR, or just
+  stage the changes.
+
+inputs:
+  client_payload:
+    description: >-
+      repository_dispatch client_payload JSON produced by `odp-releaser notify`.
+      Defaults to the payload of the workflow's triggering event.
+    required: false
+    default: ${{ toJSON(github.event.client_payload) }}
+  config_path:
+    description: Path to the image manifest config file.
+    required: false
+    default: .github/image_manifest.yaml
+  verbosity:
+    description: >-
+      CLI verbosity: 0=warning, 1=info (default), 2 or more=debug. Maps to the
+      CLI's -v/-vv/-vvv flags (capped at 3).
+    required: false
+    default: "1"
+  git_user_name:
+    description: Git author/committer name for direct commits.
+    required: false
+    default: odp-releaser[bot]
+  git_user_email:
+    description: Git author/committer email for direct commits.
+    required: false
+    default: odp-releaser[bot]@users.noreply.github.com
+  stage_only:
+    description: >-
+      When "true", write the manifest changes and `git add` them, but make no
+      commit and open no pull request, leaving follow-up steps to the caller.
+      The image's update_mode is ignored.
+    required: false
+    default: "false"
+  dry_run:
+    description: >-
+      When "true", run the CLI with --dry-run (no manifest files written) and
+      skip the stage, commit, and pull-request steps. Outputs are still
+      produced. Testing aid; used by this repo's own e2e CI.
+    required: false
+    default: "false"
+  token:
+    description: >-
+      Token used to push the bump commit or open the pull request. Pass an
+      app-minted token if the resulting commit/PR should trigger CI.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  image_name:
+    description: Image name the bump ran for (no tag or digest).
+    value: ${{ steps.bump.outputs.image_name }}
+  digest:
+    description: Digest (sha256:...) of the image the bump ran for.
+    value: ${{ steps.bump.outputs.digest }}
+  changed:
+    description: Whether any manifests changed ("true"/"false").
+    value: ${{ steps.bump.outputs.changed }}
+  update_mode:
+    description:
+      Update mode resolved from the image manifest config
+      ("commit"/"pull_request").
+    value: ${{ steps.bump.outputs.update_mode }}
+  branch_name:
+    description: Branch name used for pull_request mode.
+    value: ${{ steps.bump.outputs.branch_name }}
+  commit_message:
+    description: Generated commit message for the bump.
+    value: ${{ steps.bump.outputs.commit_message }}
+  pr_title:
+    description: Generated pull request title for the bump.
+    value: ${{ steps.bump.outputs.pr_title }}
+  pr_body:
+    description: Generated pull request body for the bump.
+    value: ${{ steps.bump.outputs.pr_body }}
+
+runs:
+  using: composite
+  steps:
+    - name: Bump images
+      id: bump
+      shell: bash
+      env:
+        IMAGE_MANIFEST_CONFIG_PATH: ${{ inputs.config_path }}
+        CLIENT_PAYLOAD: ${{ inputs.client_payload }}
+        VERBOSITY: ${{ inputs.verbosity }}
+        DRY_RUN: ${{ inputs.dry_run }}
+      run: |
+        if ! command -v odp-releaser >/dev/null; then
+          echo "::error::odp-releaser CLI not found on the PATH; run the" \
+            "gulfofmaine/odp-releaser/.github/actions/install action first"
+          exit 1
+        fi
+        case "$VERBOSITY" in
+          0) FLAGS=() ;;
+          1) FLAGS=(-v) ;;
+          2) FLAGS=(-vv) ;;
+          *) FLAGS=(-vvv) ;;
+        esac
+        BUMP_ARGS=()
+        if [ "$DRY_RUN" = "true" ]; then
+          BUMP_ARGS+=(--dry-run)
+        fi
+        odp-releaser "${FLAGS[@]}" bump-images "${BUMP_ARGS[@]}"
+
+    - name: Stage bump
+      if:
+        inputs.dry_run != 'true' && inputs.stage_only == 'true' &&
+        steps.bump.outputs.changed == 'true'
+      shell: bash
+      run: git add -A
+
+    - name: Commit bump
+      if:
+        inputs.dry_run != 'true' && inputs.stage_only != 'true' &&
+        steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
+        == 'commit'
+      shell: bash
+      env:
+        GIT_USER_NAME: ${{ inputs.git_user_name }}
+        GIT_USER_EMAIL: ${{ inputs.git_user_email }}
+        COMMIT_MESSAGE: ${{ steps.bump.outputs.commit_message }}
+      run: |
+        git config user.name "$GIT_USER_NAME"
+        git config user.email "$GIT_USER_EMAIL"
+        git add -A
+        git commit -m "$COMMIT_MESSAGE"
+        git push
+
+    - name: Open bump pull request
+      if:
+        inputs.dry_run != 'true' && inputs.stage_only != 'true' &&
+        steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
+        == 'pull_request'
+      uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1 # zizmor: ignore[superfluous-actions]
+      with:
+        token: ${{ inputs.token }}
+        branch: ${{ steps.bump.outputs.branch_name }}
+        commit-message: ${{ steps.bump.outputs.commit_message }}
+        title: ${{ steps.bump.outputs.pr_title }}
+        body: ${{ steps.bump.outputs.pr_body }}
+        committer: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
+        author: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
+        delete-branch: true

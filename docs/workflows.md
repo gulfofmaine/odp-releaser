@@ -9,7 +9,10 @@ a container image from a **source** repo (builds and pushes the image) to any
 number of **deploy** repos (own the Kubernetes/Kustomize/Helm manifests that
 reference it). Both are called with the
 [cross-repo `uses:` syntax](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#calling-a-reusable-workflow)
-and both install the `odp-releaser` CLI to do the actual work.
+and both install the `odp-releaser` CLI to do the actual work. The install
+and bump steps are themselves packaged as
+[composite actions](actions.md) that the workflows dog-food — use those
+directly when you need to add your own steps around the bump.
 
 ## End-to-end flow
 
@@ -210,11 +213,35 @@ succession.
 
 | Output | Description |
 | --- | --- |
+| `image_name` | Image name the bump ran for (no tag or digest). |
+| `digest` | Digest (`sha256:...`) of the image the bump ran for. |
 | `changed` | Whether any manifest content changed (`"true"`/`"false"`). |
 | `update_mode` | Resolved update mode (`"commit"` or `"pull_request"`). |
 | `branch_name` | Branch name a `pull_request`-mode bump uses (`odp-releaser/bump-<image_name>`). |
 | `commit_message` | Full commit message for the bump. |
 | `pr_title` | Title for the bump pull request. |
+
+Follow-up jobs in the calling workflow can consume these, e.g.:
+
+```yaml
+jobs:
+  bump:
+    uses: gulfofmaine/odp-releaser/.github/workflows/bump-images.yml@<sha-or-tag>
+
+  report:
+    needs: [bump]
+    if: needs.bump.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          IMAGE_NAME: ${{ needs.bump.outputs.image_name }}
+          DIGEST: ${{ needs.bump.outputs.digest }}
+        run: echo "Bumped $IMAGE_NAME to $DIGEST"
+```
+
+To insert steps *between* the bump and the commit/PR (e.g. syncing the image
+to another registry), use the [`bump_images` composite action](actions.md#bump_images)
+with `stage_only: "true"` instead of this workflow.
 
 ### `commit` vs `pull_request`
 
@@ -241,12 +268,13 @@ for how to obtain and wire those credentials.
 ## Versioning and pinning
 
 Callers should pin the `uses:` reference to a tag or commit SHA
-(`@<sha-or-tag>`), not a branch. Both reusable workflows install the
-`odp-releaser` CLI from `git+https://github.com/gulfofmaine/odp-releaser` at
-`${{ github.job_workflow_sha }}` — the exact commit of the reusable workflow
-file that GitHub resolved for this run. That keeps the workflow YAML and the
-CLI it invokes permanently in lockstep: pinning the workflow reference is
-enough to pin the CLI version too, with no separate version input to keep in
+(`@<sha-or-tag>`), not a branch. Both reusable workflows check out their own
+repository at `${{ job.workflow_sha }}` — the exact commit of the reusable
+workflow file that GitHub resolved for this run — and run the
+[composite actions](actions.md) (and through them the `odp-releaser` CLI)
+from that checkout. That keeps the workflow YAML, the actions, and the CLI
+they invoke permanently in lockstep: pinning the workflow reference is
+enough to pin everything else too, with no separate version input to keep in
 sync.
 
 ## Self-testing (e2e CI)
@@ -269,12 +297,14 @@ documented above:
   kustomize pin styles).
 - `e2e-assert` checks the workflows' outputs: notify's `results` (both
   targets attempted, all ok, dry-run detail) and `target_count`, plus
-  bump-images' `changed`, `update_mode`, `commit_message`, `pr_title`, and
-  `branch_name`.
+  bump-images' `image_name`, `digest`, `changed`, `update_mode`,
+  `commit_message`, `pr_title`, and `branch_name`.
 
 Because the reusable workflows are called locally (`uses: ./.github/...`),
-each PR run also proves the real `uv tool install git+...@<workflow sha>`
-install path against the PR's own commit.
+each PR run also proves the real production path against the PR's own
+commit: the checkout of this repo at `job.workflow_sha`, both
+[composite actions](actions.md), and the CLI they install from that
+checkout.
 
 ## `client_payload.repo` and `allowed_source_repos`
 

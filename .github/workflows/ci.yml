@@ -185,10 +185,15 @@ jobs:
       COMMIT_CHANGED: ${{ needs.e2e-bump-commit.outputs.changed }}
       COMMIT_MODE: ${{ needs.e2e-bump-commit.outputs.update_mode }}
       COMMIT_MESSAGE: ${{ needs.e2e-bump-commit.outputs.commit_message }}
+      COMMIT_IMAGE_NAME: ${{ needs.e2e-bump-commit.outputs.image_name }}
+      COMMIT_DIGEST: ${{ needs.e2e-bump-commit.outputs.digest }}
       PR_CHANGED: ${{ needs.e2e-bump-pr.outputs.changed }}
       PR_MODE: ${{ needs.e2e-bump-pr.outputs.update_mode }}
       PR_TITLE: ${{ needs.e2e-bump-pr.outputs.pr_title }}
       PR_BRANCH: ${{ needs.e2e-bump-pr.outputs.branch_name }}
+      PR_IMAGE_NAME: ${{ needs.e2e-bump-pr.outputs.image_name }}
+      PR_DIGEST: ${{ needs.e2e-bump-pr.outputs.digest }}
+      E2E_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     steps:
       - name: Assert notify and bump-images outputs
         run: |
@@ -219,12 +224,18 @@ jobs:
             "true"
           expect "commit-mode changed" "$COMMIT_CHANGED" "true"
           expect "commit-mode update_mode" "$COMMIT_MODE" "commit"
+          expect "commit-mode image_name" "$COMMIT_IMAGE_NAME" \
+            "ghcr.io/gulfofmaine/odp-releaser-e2e-commit"
+          expect "commit-mode digest" "$COMMIT_DIGEST" "$E2E_DIGEST"
           expect_contains "commit-mode commit_message" "$COMMIT_MESSAGE" \
             "Update image ghcr.io/gulfofmaine/odp-releaser-e2e-commit to $TAG"
           expect_contains "commit-mode commit_message" "$COMMIT_MESSAGE" \
             "commit.kustomization.yaml"
           expect "pr-mode changed" "$PR_CHANGED" "true"
           expect "pr-mode update_mode" "$PR_MODE" "pull_request"
+          expect "pr-mode image_name" "$PR_IMAGE_NAME" \
+            "ghcr.io/gulfofmaine/odp-releaser-e2e-pr"
+          expect "pr-mode digest" "$PR_DIGEST" "$E2E_DIGEST"
           expect "pr-mode pr_title" "$PR_TITLE" \
             "Update image ghcr.io/gulfofmaine/odp-releaser-e2e-pr to $TAG"
           expect "pr-mode branch_name" "$PR_BRANCH" \
