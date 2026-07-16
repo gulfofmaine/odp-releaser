@@ -1,0 +1,12 @@
+# Deploy targets for the e2e jobs in .github/workflows/ci.yml.
+#
+# `notify` is only ever run against this file with --dry-run, which resolves
+# credentials per target but never contacts GitHub, so these repos don't need
+# to exist. The two owners exercise both credential-resolution paths: the
+# default DISPATCH_APP_ID/DISPATCH_APP_PRIVATE_KEY pair and a per-owner
+# DISPATCH_APPS entry.
+- owner: gulfofmaine
+  repo: odp-releaser-e2e-target
+- owner: odp-e2e-org
+  repo: odp-releaser-e2e-target
+  event_type: image-published-e2e

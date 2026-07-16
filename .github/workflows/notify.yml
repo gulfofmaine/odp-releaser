@@ -62,6 +62,23 @@ on:
         required: false
         type: number
         default: 1
+      dry_run:
+        description: >-
+          Resolve dispatch credentials for every target but send no dispatch
+          events. Testing aid; used by this repo's own e2e CI.
+        required: false
+        type: boolean
+        default: false
+      event_name:
+        description: >-
+          Override the GitHub event name used to build the client payload
+          (testing aid). Empty (the default) uses the run's real event. Only
+          push, release, and workflow_dispatch are supported by the payload
+          builder; workflow_dispatch is the simplest override as it needs no
+          event file, token, or pull request lookup.
+        required: false
+        type: string
+        default: ""
     secrets:
       dispatch_app_id:
         description:
@@ -122,6 +139,8 @@ jobs:
           DISPATCH_APP_PRIVATE_KEY: ${{ secrets.dispatch_app_private_key }}
           DISPATCH_APPS: ${{ secrets.dispatch_apps }}
           VERBOSITY: ${{ inputs.verbosity }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          EVENT_NAME_OVERRIDE: ${{ inputs.event_name }}
         run: |
           case "$VERBOSITY" in
             0) FLAGS=() ;;
@@ -129,4 +148,12 @@ jobs:
             2) FLAGS=(-vv) ;;
             *) FLAGS=(-vvv) ;;
           esac
-          odp-releaser "${FLAGS[@]}" notify "$IMAGE_NAME" "$TAG" "$DIGEST"
+          NOTIFY_ARGS=()
+          if [ "$DRY_RUN" = "true" ]; then
+            NOTIFY_ARGS+=(--dry-run)
+          fi
+          if [ -n "$EVENT_NAME_OVERRIDE" ]; then
+            NOTIFY_ARGS+=(--github-event-name "$EVENT_NAME_OVERRIDE")
+          fi
+          odp-releaser "${FLAGS[@]}" notify "$IMAGE_NAME" "$TAG" "$DIGEST" \
+            "${NOTIFY_ARGS[@]}"

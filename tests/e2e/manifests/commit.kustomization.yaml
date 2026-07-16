@@ -1,0 +1,10 @@
+# E2E fixture: bumped in commit mode with `pin: tag`, so the matching
+# images entry must already have a newTag to overwrite.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: odp-releaser-e2e
+resources:
+  - deployment.yaml
+images:
+  - name: ghcr.io/gulfofmaine/odp-releaser-e2e-commit
+    newTag: "e2e-placeholder"

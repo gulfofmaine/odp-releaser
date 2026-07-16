@@ -57,6 +57,38 @@ on:
         required: false
         type: number
         default: 1
+      client_payload:
+        description: >-
+          Explicit client_payload JSON string. Empty (the default) uses the
+          triggering repository_dispatch event's client_payload. Testing aid for
+          calling this workflow outside a repository_dispatch run.
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: >-
+          Run the CLI with --dry-run (no manifest files written) and skip the
+          commit and pull-request steps. Outputs are still produced. Testing
+          aid; used by this repo's own e2e CI.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      changed:
+        description: Whether any manifest content changed ("true"/"false").
+        value: ${{ jobs.bump.outputs.changed }}
+      update_mode:
+        description: Resolved update mode ("commit" or "pull_request").
+        value: ${{ jobs.bump.outputs.update_mode }}
+      branch_name:
+        description: Branch name a pull_request-mode bump uses.
+        value: ${{ jobs.bump.outputs.branch_name }}
+      commit_message:
+        description: Full commit message for the bump.
+        value: ${{ jobs.bump.outputs.commit_message }}
+      pr_title:
+        description: Title for the bump pull request.
+        value: ${{ jobs.bump.outputs.pr_title }}
     secrets:
       ci_app_id:
         description: >-
@@ -78,8 +110,19 @@ jobs:
       pull-requests: write # open the bump pull request
     env:
       HAS_CI_APP: ${{ secrets.ci_app_id != '' }}
+    outputs:
+      changed: ${{ steps.bump.outputs.changed }}
+      update_mode: ${{ steps.bump.outputs.update_mode }}
+      branch_name: ${{ steps.bump.outputs.branch_name }}
+      commit_message: ${{ steps.bump.outputs.commit_message }}
+      pr_title: ${{ steps.bump.outputs.pr_title }}
     concurrency:
-      group: odp-releaser-${{ github.event.client_payload.image_name }}
+      # client_payload.image_name is empty when this workflow is called
+      # outside a repository_dispatch run (e.g. this repo's e2e CI); fall
+      # back to a run-scoped group so unrelated runs never share a queue.
+      group:
+        odp-releaser-${{ github.event.client_payload.image_name || github.run_id
+        }}
       cancel-in-progress: false
     steps:
       - name: Generate app token
@@ -120,8 +163,10 @@ jobs:
         id: bump
         env:
           IMAGE_MANIFEST_CONFIG_PATH: ${{ inputs.config_path }}
-          CLIENT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          CLIENT_PAYLOAD:
+            ${{ inputs.client_payload || toJSON(github.event.client_payload) }}
           VERBOSITY: ${{ inputs.verbosity }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           case "$VERBOSITY" in
             0) FLAGS=() ;;
@@ -129,12 +174,16 @@ jobs:
             2) FLAGS=(-vv) ;;
             *) FLAGS=(-vvv) ;;
           esac
-          odp-releaser "${FLAGS[@]}" bump-images
+          BUMP_ARGS=()
+          if [ "$DRY_RUN" = "true" ]; then
+            BUMP_ARGS+=(--dry-run)
+          fi
+          odp-releaser "${FLAGS[@]}" bump-images "${BUMP_ARGS[@]}"
 
       - name: Commit bump
-        if:
-          steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
-          == 'commit'
+        if: >-
+          !inputs.dry_run && steps.bump.outputs.changed == 'true' &&
+          steps.bump.outputs.update_mode == 'commit'
         env:
           GIT_USER_NAME: ${{ inputs.git_user_name }}
           GIT_USER_EMAIL: ${{ inputs.git_user_email }}
@@ -147,9 +196,9 @@ jobs:
           git push
 
       - name: Open bump pull request
-        if:
-          steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
-          == 'pull_request'
+        if: >-
+          !inputs.dry_run && steps.bump.outputs.changed == 'true' &&
+          steps.bump.outputs.update_mode == 'pull_request'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1 # zizmor: ignore[superfluous-actions]
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}

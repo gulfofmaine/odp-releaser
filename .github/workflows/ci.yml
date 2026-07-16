@@ -83,10 +83,153 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  # The e2e-* jobs exercise the reusable notify and bump-images workflows
+  # end-to-end on every PR: notify runs in --dry-run mode against fixture
+  # deploy targets with dummy credentials, and bump-images consumes freshly
+  # generated client payloads against fixture manifests in tests/e2e/.
+  e2e-payload:
+    name: E2E build client payloads
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      commit_payload: ${{ steps.payloads.outputs.commit_payload }}
+      pr_payload: ${{ steps.payloads.outputs.pr_payload }}
+      tag: ${{ steps.payloads.outputs.tag }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+
+      - name: Install odp-releaser from this checkout
+        run: uv tool install .
+
+      - name: Build client payloads
+        id: payloads
+        env:
+          DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: |
+          TAG="e2e-${GITHUB_SHA:0:7}"
+          COMMIT_PAYLOAD=$(odp-releaser test make-payload \
+            ghcr.io/gulfofmaine/odp-releaser-e2e-commit "$TAG" "$DIGEST" \
+            --github-event-name workflow_dispatch)
+          PR_PAYLOAD=$(odp-releaser test make-payload \
+            ghcr.io/gulfofmaine/odp-releaser-e2e-pr "$TAG" "$DIGEST" \
+            --github-event-name workflow_dispatch)
+          {
+            printf 'commit_payload=%s\n' "$COMMIT_PAYLOAD"
+            printf 'pr_payload=%s\n' "$PR_PAYLOAD"
+            printf 'tag=%s\n' "$TAG"
+          } >> "$GITHUB_OUTPUT"
+
+  e2e-notify:
+    name: E2E notify (dry run)
+    permissions:
+      contents: read # notify.yml checks out this repo to read the deploy targets
+      pull-requests: read # match notify.yml's declared job permissions
+    uses: ./.github/workflows/notify.yml
+    with:
+      image_name: ghcr.io/gulfofmaine/odp-releaser-e2e-commit
+      tag: e2e
+      digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      deploy_targets_path: tests/e2e/deploy_targets.yaml
+      event_name: workflow_dispatch
+      dry_run: true
+      verbosity: 2
+    secrets:
+      # Dummy values: --dry-run only checks credential *presence* per target
+      # owner (resolve_app_credentials); nothing is minted or sent.
+      dispatch_app_id: "000000"
+      dispatch_app_private_key: e2e-dummy-not-a-real-key
+      dispatch_apps:
+        '{"odp-e2e-org": {"app_id": "111111", "private_key":
+        "e2e-dummy-not-a-real-key"}}'
+
+  e2e-bump-commit:
+    name: E2E bump-images (commit mode)
+    needs: [e2e-payload]
+    permissions:
+      contents: write # match bump-images.yml's declared job permissions; dry_run never pushes
+      pull-requests: write # match bump-images.yml's declared job permissions; dry_run opens no PR
+    uses: ./.github/workflows/bump-images.yml
+    with:
+      config_path: tests/e2e/image_manifest.yaml
+      client_payload: ${{ needs.e2e-payload.outputs.commit_payload }}
+      dry_run: true
+      verbosity: 2
+
+  e2e-bump-pr:
+    name: E2E bump-images (pull_request mode)
+    needs: [e2e-payload]
+    permissions:
+      contents: write # match bump-images.yml's declared job permissions; dry_run never pushes
+      pull-requests: write # match bump-images.yml's declared job permissions; dry_run opens no PR
+    uses: ./.github/workflows/bump-images.yml
+    with:
+      config_path: tests/e2e/image_manifest.yaml
+      client_payload: ${{ needs.e2e-payload.outputs.pr_payload }}
+      dry_run: true
+      verbosity: 2
+
+  e2e-assert:
+    name: E2E assert bump outputs
+    needs: [e2e-payload, e2e-bump-commit, e2e-bump-pr]
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      TAG: ${{ needs.e2e-payload.outputs.tag }}
+      COMMIT_CHANGED: ${{ needs.e2e-bump-commit.outputs.changed }}
+      COMMIT_MODE: ${{ needs.e2e-bump-commit.outputs.update_mode }}
+      COMMIT_MESSAGE: ${{ needs.e2e-bump-commit.outputs.commit_message }}
+      PR_CHANGED: ${{ needs.e2e-bump-pr.outputs.changed }}
+      PR_MODE: ${{ needs.e2e-bump-pr.outputs.update_mode }}
+      PR_TITLE: ${{ needs.e2e-bump-pr.outputs.pr_title }}
+      PR_BRANCH: ${{ needs.e2e-bump-pr.outputs.branch_name }}
+    steps:
+      - name: Assert bump-images outputs
+        run: |
+          fail=0
+          expect() { # expect <label> <actual> <expected>
+            if [ "$2" != "$3" ]; then
+              echo "::error::$1: expected '$3', got '$2'"
+              fail=1
+            fi
+          }
+          expect_contains() { # expect_contains <label> <haystack> <needle>
+            case "$2" in
+              *"$3"*) ;;
+              *) echo "::error::$1 does not contain '$3'"; fail=1 ;;
+            esac
+          }
+          expect "commit-mode changed" "$COMMIT_CHANGED" "true"
+          expect "commit-mode update_mode" "$COMMIT_MODE" "commit"
+          expect_contains "commit-mode commit_message" "$COMMIT_MESSAGE" \
+            "Update image ghcr.io/gulfofmaine/odp-releaser-e2e-commit to $TAG"
+          expect_contains "commit-mode commit_message" "$COMMIT_MESSAGE" \
+            "commit.kustomization.yaml"
+          expect "pr-mode changed" "$PR_CHANGED" "true"
+          expect "pr-mode update_mode" "$PR_MODE" "pull_request"
+          expect "pr-mode pr_title" "$PR_TITLE" \
+            "Update image ghcr.io/gulfofmaine/odp-releaser-e2e-pr to $TAG"
+          expect "pr-mode branch_name" "$PR_BRANCH" \
+            "odp-releaser/bump-ghcr.io-gulfofmaine-odp-releaser-e2e-pr"
+          exit "$fail"
+
   pass:
     name: All checks passed
     if: always()
-    needs: [lint, checks]
+    needs:
+      [
+        lint,
+        checks,
+        e2e-payload,
+        e2e-notify,
+        e2e-bump-commit,
+        e2e-bump-pr,
+        e2e-assert,
+      ]
     runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
