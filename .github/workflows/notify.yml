@@ -79,6 +79,15 @@ on:
         required: false
         type: string
         default: ""
+    outputs:
+      results:
+        description: >-
+          JSON array of per-target dispatch results, each
+          {owner, repo, event_type, ok, detail}.
+        value: ${{ jobs.notify.outputs.results }}
+      target_count:
+        description: Number of deploy targets that were attempted.
+        value: ${{ jobs.notify.outputs.target_count }}
     secrets:
       dispatch_app_id:
         description:
@@ -106,6 +115,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read # odp-releaser reads PR metadata for the dispatch payload
+    outputs:
+      results: ${{ steps.notify.outputs.results }}
+      target_count: ${{ steps.notify.outputs.target_count }}
     steps:
       - name: Checkout calling repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -129,6 +141,7 @@ jobs:
           git+https://github.com/gulfofmaine/odp-releaser.git@${ODP_RELEASER_REF}
 
       - name: Notify deploy targets
+        id: notify
         env:
           IMAGE_NAME: ${{ inputs.image_name }}
           TAG: ${{ inputs.tag }}

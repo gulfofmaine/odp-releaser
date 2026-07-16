@@ -174,12 +174,14 @@ jobs:
       verbosity: 2
 
   e2e-assert:
-    name: E2E assert bump outputs
-    needs: [e2e-payload, e2e-bump-commit, e2e-bump-pr]
+    name: E2E assert notify and bump outputs
+    needs: [e2e-payload, e2e-notify, e2e-bump-commit, e2e-bump-pr]
     runs-on: ubuntu-latest
     permissions: {}
     env:
       TAG: ${{ needs.e2e-payload.outputs.tag }}
+      NOTIFY_RESULTS: ${{ needs.e2e-notify.outputs.results }}
+      NOTIFY_TARGET_COUNT: ${{ needs.e2e-notify.outputs.target_count }}
       COMMIT_CHANGED: ${{ needs.e2e-bump-commit.outputs.changed }}
       COMMIT_MODE: ${{ needs.e2e-bump-commit.outputs.update_mode }}
       COMMIT_MESSAGE: ${{ needs.e2e-bump-commit.outputs.commit_message }}
@@ -188,7 +190,7 @@ jobs:
       PR_TITLE: ${{ needs.e2e-bump-pr.outputs.pr_title }}
       PR_BRANCH: ${{ needs.e2e-bump-pr.outputs.branch_name }}
     steps:
-      - name: Assert bump-images outputs
+      - name: Assert notify and bump-images outputs
         run: |
           fail=0
           expect() { # expect <label> <actual> <expected>
@@ -203,6 +205,18 @@ jobs:
               *) echo "::error::$1 does not contain '$3'"; fail=1 ;;
             esac
           }
+          expect "notify target_count" "$NOTIFY_TARGET_COUNT" "2"
+          expect "notify results length" \
+            "$(jq 'length' <<<"$NOTIFY_RESULTS")" "2"
+          expect "notify results all ok" \
+            "$(jq 'all(.ok)' <<<"$NOTIFY_RESULTS")" "true"
+          expect "notify results targets" \
+            "$(jq -r '[.[] | "\(.owner)/\(.repo):\(.event_type)"] | join(",")' \
+              <<<"$NOTIFY_RESULTS")" \
+            "gulfofmaine/odp-releaser-e2e-target:image-published,odp-e2e-org/odp-releaser-e2e-target:image-published-e2e"
+          expect "notify results all dry run" \
+            "$(jq 'all(.detail == "dry run (not sent)")' <<<"$NOTIFY_RESULTS")" \
+            "true"
           expect "commit-mode changed" "$COMMIT_CHANGED" "true"
           expect "commit-mode update_mode" "$COMMIT_MODE" "commit"
           expect_contains "commit-mode commit_message" "$COMMIT_MESSAGE" \

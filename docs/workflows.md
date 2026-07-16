@@ -103,6 +103,13 @@ above.
 See [GitHub Apps](github_apps.md) for where these credentials come from and
 how to request them from a deploy org.
 
+### Outputs
+
+| Output | Description |
+| --- | --- |
+| `results` | JSON array of per-target dispatch results, each `{owner, repo, event_type, ok, detail}`. |
+| `target_count` | Number of deploy targets that were attempted. |
+
 ### The protected `environment` gate
 
 Setting `environment` runs the job under that
@@ -134,9 +141,10 @@ Each entry:
 | `event_type` | no | `image-published` | `repository_dispatch` event type to send. |
 
 A missing file is an error: `notify` exits non-zero and suggests generating
-one with `odp-releaser generate-config deploy-targets`. An existing file that
-is empty or contains an empty array is a valid no-op — `notify` logs that
-there's nothing to dispatch and exits successfully.
+one with `odp-releaser generate-config deploy-targets`. A file that is empty
+or contains an empty array is also an error — a targets file with nothing to
+dispatch to is treated as a misconfiguration rather than a silent no-op, so
+`notify` exits non-zero.
 
 ## Bump images
 
@@ -251,15 +259,18 @@ documented above:
   `event_name: workflow_dispatch`, dummy dispatch credentials, and the
   fixture targets in `tests/e2e/deploy_targets.yaml`. Credentials are
   resolved for every target but nothing is dispatched; the job fails if any
-  target's credentials can't be resolved.
+  target's credentials can't be resolved, and its `results`/`target_count`
+  outputs are asserted downstream.
 - `e2e-payload` installs the CLI from the PR's checkout and generates real
   client payloads with `odp-releaser test make-payload`.
 - `e2e-bump-commit` / `e2e-bump-pr` call `bump-images.yml` with those
   payloads, `dry_run: true`, and the fixture config in
   `tests/e2e/image_manifest.yaml` (one image per update mode, covering both
   kustomize pin styles).
-- `e2e-assert` checks the workflows' outputs (`changed`, `update_mode`,
-  `commit_message`, `pr_title`, `branch_name`).
+- `e2e-assert` checks the workflows' outputs: notify's `results` (both
+  targets attempted, all ok, dry-run detail) and `target_count`, plus
+  bump-images' `changed`, `update_mode`, `commit_message`, `pr_title`, and
+  `branch_name`.
 
 Because the reusable workflows are called locally (`uses: ./.github/...`),
 each PR run also proves the real `uv tool install git+...@<workflow sha>`

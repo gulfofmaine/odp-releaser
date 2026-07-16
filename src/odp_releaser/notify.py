@@ -17,6 +17,7 @@ level) are logged.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -51,7 +52,7 @@ from odp_releaser.github import (
     resolve_app_credentials,
     send_dispatch,
 )
-from odp_releaser.github_output import write_step_summary
+from odp_releaser.github_output import write_github_output, write_step_summary
 from odp_releaser.logger import logger
 from odp_releaser.make_payload import resolve_client_payload
 from odp_releaser.schemas.dispatch import DeployTarget
@@ -97,6 +98,18 @@ class MissingDeployTargetsError(Exception):
         )
 
 
+class EmptyDeployTargetsError(Exception):
+    """The deploy targets file exists but contains no targets."""
+
+    def __init__(self, targets_path: Path) -> None:
+        self.targets_path = targets_path
+        super().__init__(
+            f"No deploy targets configured in {targets_path}. Add at least "
+            "one target, or generate a starter file with "
+            "`odp-releaser generate-config deploy-targets`."
+        )
+
+
 @dataclass
 class TargetResult:
     """The outcome of attempting to dispatch to a single deploy target."""
@@ -111,7 +124,9 @@ def load_targets(targets_path: Path) -> list[DeployTarget]:
 
     The file is parsed as YAML — a superset of JSON, so JSON files also load.
     Raises :class:`MissingDeployTargetsError` when the file does not exist.
-    Returns an empty list when the file exists but is empty or an empty array.
+    Raises :class:`EmptyDeployTargetsError` when the file exists but is empty
+    or contains an empty array — a targets file with nothing to dispatch to
+    is treated as a configuration error rather than a silent no-op.
     Raises :class:`InvalidDeployTargetsError` when the content is not valid
     YAML or does not match the :class:`DeployTarget` schema.
     """
@@ -120,7 +135,7 @@ def load_targets(targets_path: Path) -> list[DeployTarget]:
 
     content = targets_path.read_text().strip()
     if not content:
-        return []
+        raise EmptyDeployTargetsError(targets_path)
 
     yaml = ruamel.yaml.YAML(typ="safe", pure=True)
     try:
@@ -129,12 +144,15 @@ def load_targets(targets_path: Path) -> list[DeployTarget]:
         raise InvalidDeployTargetsError(targets_path, str(exc)) from exc
 
     if data is None:
-        return []
+        raise EmptyDeployTargetsError(targets_path)
 
     try:
         targets = _TARGETS_ADAPTER.validate_python(data)
     except ValidationError as exc:
         raise InvalidDeployTargetsError(targets_path, str(exc)) from exc
+
+    if not targets:
+        raise EmptyDeployTargetsError(targets_path)
     return targets
 
 
@@ -180,6 +198,11 @@ def notify(
 
     With ``--dry-run`` credentials are resolved for each target but no tokens
     are minted and no dispatch events are sent.
+
+    Writes the per-target outcomes to ``GITHUB_OUTPUT`` as a ``results`` JSON
+    array of ``{owner, repo, event_type, ok, detail}`` objects plus a
+    ``target_count``, so callers (including this repo's own e2e CI) can assert
+    on what happened instead of only on the exit code.
     """
     # pylint: disable=duplicate-code
     try:
@@ -206,18 +229,14 @@ def notify(
 
     try:
         targets = load_targets(targets_path)
-    except (MissingDeployTargetsError, InvalidDeployTargetsError) as exc:
+    except (
+        MissingDeployTargetsError,
+        EmptyDeployTargetsError,
+        InvalidDeployTargetsError,
+    ) as exc:
         logger.error("%s", exc)
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
-
-    if not targets:
-        message = (
-            f"No deploy targets configured in {targets_path}; nothing to dispatch."
-        )
-        logger.info(message)
-        write_step_summary(message)
-        return
 
     client_payload = payload.model_dump(mode="json")
 
@@ -246,6 +265,24 @@ def notify(
     table = _summary_table(results)
     write_step_summary(table)
     logger.info("Deploy dispatch summary:\n%s", table)
+
+    write_github_output(
+        {
+            "results": json.dumps(
+                [
+                    {
+                        "owner": result.target.owner,
+                        "repo": result.target.repo,
+                        "event_type": result.target.event_type,
+                        "ok": result.ok,
+                        "detail": result.detail,
+                    }
+                    for result in results
+                ]
+            ),
+            "target_count": str(len(results)),
+        }
+    )
 
     if any(not result.ok for result in results):
         raise typer.Exit(1)
@@ -284,8 +321,8 @@ def test_notify(
     every configured target owner.
 
     Missing credentials for a target are reported, not treated as a failure:
-    the command exits non-zero only when `targets_path` does not exist or
-    fails to parse as a valid deploy-targets file.
+    the command exits non-zero only when `targets_path` does not exist, is
+    empty, or fails to parse as a valid deploy-targets file.
     """
     if image_name is None:
         image_name = prompt_image_name()
@@ -298,16 +335,14 @@ def test_notify(
 
     try:
         targets = load_targets(targets_path)
-    except (MissingDeployTargetsError, InvalidDeployTargetsError) as exc:
+    except (
+        MissingDeployTargetsError,
+        EmptyDeployTargetsError,
+        InvalidDeployTargetsError,
+    ) as exc:
         logger.error("%s", exc)
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
-
-    if not targets:
-        message = f"No deploy targets configured in {targets_path}; nothing to test."
-        logger.info(message)
-        write_step_summary(message)
-        return
 
     results: list[TargetResult] = []
     for target in targets:
