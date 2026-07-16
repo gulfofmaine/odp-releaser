@@ -101,5 +101,5 @@ def test_set_templates_apply_to_values_file() -> None:
         FIXTURE, values_text, manifest, payload, commit_message
     )
 
-    assert "tag: 9f8e7d6" in result
-    assert 'tag: "9f8e7d6"' not in result
+    assert "tag: 9f8e7d6" not in result
+    assert 'tag: "9f8e7d6"' in result

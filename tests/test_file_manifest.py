@@ -55,7 +55,7 @@ def test_yaml_file_manifest_applies_set_templates() -> None:
     )
 
     assert "image: gmri/example:7c8d9e0" in result
-    assert "gmri.org/digest: sha256:abc123abc123abc123abc123abc123abc123" in result
+    assert 'gmri.org/digest: "sha256:abc123abc123abc123abc123abc123abc123"' in result
 
 
 def test_json_file_manifest_stays_valid_json_with_stable_formatting() -> None:
