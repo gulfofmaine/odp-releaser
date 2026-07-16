@@ -36,6 +36,23 @@ def set_value(
     return f"Set value for path {path} to {value}"
 
 
+_QUOTED_PATH_SUFFIXES = ("tag", "digest")
+
+
+def _value_format_for_path(set_path: str) -> YAMLValueFormats:
+    """Force double-quoting for tag/digest-like ``manifest.set`` paths.
+
+    Bare tags and digests (e.g. ``1.2.3``, ``sha256:abc...``) can be
+    misparsed as non-string YAML scalars, so those paths are always
+    quoted. Other ``set`` paths (e.g. kustomize ``resources`` refs) keep
+    whatever quote style is already in the file.
+    """
+    last_segment = set_path.rsplit("/", 1)[-1]
+    if last_segment.lower() in _QUOTED_PATH_SUFFIXES:
+        return YAMLValueFormats.DQUOTE
+    return YAMLValueFormats.DEFAULT
+
+
 def apply_set_templates(
     processor: Processor,
     set_paths: dict[str, str],
@@ -55,5 +72,12 @@ def apply_set_templates(
         except KeyError as e:
             msg = f"Error setting value for path '{set_path}' with value '{value}'"
             raise KeyError(msg) from e
-        message = set_value(processor, set_path, formatted_value, mustexist=True)
+        value_format = _value_format_for_path(set_path)
+        message = set_value(
+            processor,
+            set_path,
+            formatted_value,
+            mustexist=True,
+            value_format=value_format,
+        )
         commit_message.append(f"  - {message}")
