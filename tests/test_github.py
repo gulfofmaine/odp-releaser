@@ -5,6 +5,7 @@ import json
 import httpx
 import pytest
 import respx
+from githubkit.exception import RequestFailed
 
 from odp_releaser.github import (
     AppNotInstalledError,
@@ -12,6 +13,7 @@ from odp_releaser.github import (
     create_deployment,
     create_deployment_status,
     installation_token_for,
+    is_team_member,
     list_deployments,
     pr_for_commit,
     resolve_app_credentials,
@@ -178,6 +180,48 @@ def test_pr_for_commit_empty_returns_none() -> None:
         pr = pr_for_commit("acme/widgets", "abc123", "gh_token")
 
     assert pr is None
+
+
+# --- is_team_member -----------------------------------------------------------
+
+
+def test_is_team_member_active_membership() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/teams/deployers/memberships/octocat").mock(
+            return_value=httpx.Response(200, json={"state": "active", "role": "member"})
+        )
+
+        assert is_team_member("acme", "deployers", "octocat", "gh_token") is True
+
+
+def test_is_team_member_pending_membership_is_not_a_member() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/teams/deployers/memberships/octocat").mock(
+            return_value=httpx.Response(
+                200, json={"state": "pending", "role": "member"}
+            )
+        )
+
+        assert is_team_member("acme", "deployers", "octocat", "gh_token") is False
+
+
+def test_is_team_member_404_is_not_a_member() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/teams/deployers/memberships/octocat").mock(
+            return_value=httpx.Response(404, json={"message": "Not Found"})
+        )
+
+        assert is_team_member("acme", "deployers", "octocat", "gh_token") is False
+
+
+def test_is_team_member_other_errors_propagate() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/teams/deployers/memberships/octocat").mock(
+            return_value=httpx.Response(403, json={"message": "Forbidden"})
+        )
+
+        with pytest.raises(RequestFailed):
+            is_team_member("acme", "deployers", "octocat", "gh_token")
 
 
 # --- installation_token_for --------------------------------------------------

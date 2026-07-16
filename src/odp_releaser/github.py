@@ -156,6 +156,28 @@ def resolve_reporter_credentials(owner: str) -> DispatchAppCredentials:
     )
 
 
+def is_team_member(org: str, team_slug: str, username: str, token: str) -> bool:
+    """Whether ``username`` is an active member of ``org``'s ``team_slug`` team.
+
+    Returns ``False`` when the user has no membership (404) or the membership
+    is still ``pending``. ``token`` needs organization members read access —
+    the default workflow ``GITHUB_TOKEN`` cannot read team membership. Other
+    request failures (bad credentials, missing scope, unknown team) propagate
+    so callers can distinguish "not a member" from "could not check".
+    """
+    with GitHub(TokenAuthStrategy(token)) as github:
+        try:
+            response = github.rest.teams.get_membership_for_user_in_org(
+                org, team_slug, username
+            )
+        except RequestFailed as exc:
+            if exc.response.status_code == 404:
+                return False
+            raise
+    state: str = response.json()["state"]
+    return state == "active"
+
+
 def pr_for_commit(repo: str, sha: str, token: str) -> PrMerge | None:
     """Return the first pull request associated with ``sha`` in ``repo``.
 

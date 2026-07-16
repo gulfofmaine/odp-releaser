@@ -98,6 +98,8 @@ def test_success_path_writes_github_output(
     assert metadata.environment_url is None
     assert outputs["environment"] == ""
     assert outputs["environment_url"] == ""
+    assert outputs["reviewers"] == ""
+    assert outputs["team_reviewers"] == ""
 
 
 def test_dagster_helm_and_kustomize_dry_run(
@@ -135,7 +137,7 @@ def test_dagster_helm_and_kustomize_dry_run(
     assert extract_metadata(pr_body) is not None
 
 
-def test_environment_per_image_config_overrides_top_level(
+def test_environment_per_image_config_overrides_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     output = tmp_path / "output"
@@ -143,8 +145,9 @@ def test_environment_per_image_config_overrides_top_level(
     config_path = tmp_path / "image_manifest.yaml"
     config_path.write_text(
         """
-environment: staging
-environment_url: https://staging.example.com
+defaults:
+  environment: staging
+  environment_url: https://staging.example.com
 images:
   gmri/neracoos-mariners-dashboard:
     - events: [push]
@@ -176,7 +179,7 @@ images:
     assert metadata.environment_url == expected_url
 
 
-def test_environment_falls_back_to_top_level(
+def test_environment_falls_back_to_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     output = tmp_path / "output"
@@ -184,7 +187,8 @@ def test_environment_falls_back_to_top_level(
     config_path = tmp_path / "image_manifest.yaml"
     config_path.write_text(
         """
-environment: staging
+defaults:
+  environment: staging
 images:
   gmri/neracoos-mariners-dashboard:
     - events: [push]
@@ -293,22 +297,51 @@ def test_image_present_with_empty_config_list_is_a_noop(
     assert outputs["update_mode"] == "commit"
 
 
-def test_allowed_source_repos_rejects_disallowed_repo(tmp_path: Path) -> None:
-    config_path = tmp_path / "image_manifest.yaml"
-    config_path.write_text("allowed_source_repos:\n  - someorg/somerepo\nimages: {}\n")
+def _run_bump(config_path: Path, client_payload: object) -> None:
+    bump_images(
+        config_path=config_path,
+        client_payload=client_payload.model_dump_json(),  # type: ignore[attr-defined]
+        dry_run=True,
+    )
 
+
+def _payload_for(image_name: str = "gmri/neracoos-mariners-dashboard"):
     client_payload = load_client_payload(EventType.push)
-    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
-
-    with pytest.raises(typer.Exit):
-        bump_images(
-            config_path=config_path,
-            client_payload=client_payload.model_dump_json(),
-            dry_run=True,
-        )
+    set_payload_image(image_name, client_payload)
+    return client_payload
 
 
-def test_allowed_source_repos_allows_listed_repo(
+def test_default_allowed_source_repos_rejects_disallowed_repo(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+defaults:
+  allowed_source_repos:
+    - someorg/somerepo
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+"""
+    )
+
+    client_payload = _payload_for()
+
+    with pytest.raises(typer.Exit) as excinfo:
+        _run_bump(config_path, client_payload)
+
+    assert excinfo.value.exit_code == 1
+    stderr = capsys.readouterr().err
+    assert client_payload.repo in stderr
+    assert client_payload.source.actor in stderr
+
+
+def test_default_allowed_source_repos_allows_listed_repo(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     output = tmp_path / "output"
@@ -316,23 +349,373 @@ def test_allowed_source_repos_allows_listed_repo(
 
     config_path = tmp_path / "image_manifest.yaml"
     config_path.write_text(
-        "allowed_source_repos:\n"
-        "  - ioos/buoy_retriever\n"
-        "images:\n"
-        "  gmri/neracoos-mariners-dashboard: []\n"
+        """
+defaults:
+  allowed_source_repos:
+    - ioos/buoy_retriever
+images:
+  gmri/neracoos-mariners-dashboard: []
+"""
     )
 
-    client_payload = load_client_payload(EventType.push)
-    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
-
-    bump_images(
-        config_path=config_path,
-        client_payload=client_payload.model_dump_json(),
-        dry_run=True,
-    )
+    _run_bump(config_path, _payload_for())
 
     outputs = _parse_github_output(output.read_text())
     assert outputs["changed"] == "false"
+
+
+def test_config_allowed_source_repos_replaces_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A config's own list replaces the defaults-level one, in both directions."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    # The default would reject the payload's repo, but the config's own
+    # list allows it.
+    config_path.write_text(
+        """
+defaults:
+  allowed_source_repos:
+    - someorg/somerepo
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      allowed_source_repos:
+        - ioos/buoy_retriever
+"""
+    )
+
+    _run_bump(config_path, _payload_for())
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "false"
+
+    # And the converse: the default allows, but the config's own empty
+    # list denies everyone.
+    config_path.write_text(
+        """
+defaults:
+  allowed_source_repos:
+    - ioos/buoy_retriever
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      allowed_source_repos: []
+"""
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        _run_bump(config_path, _payload_for())
+    assert excinfo.value.exit_code == 1
+
+
+def test_allowed_actors_users_rejects_all_configs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      allowed_actors:
+        users: [someone-else]
+"""
+    )
+
+    client_payload = _payload_for()
+
+    with pytest.raises(typer.Exit) as excinfo:
+        _run_bump(config_path, client_payload)
+
+    assert excinfo.value.exit_code == 1
+    assert client_payload.source.actor in capsys.readouterr().err
+
+
+def test_allowed_actors_filters_config_but_run_continues(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      environment: dev
+    - events: [push]
+      environment: production
+      allowed_actors:
+        users: [someone-else]
+"""
+    )
+
+    with caplog.at_level(logging.WARNING, logger="odp-releaser"):
+        _run_bump(config_path, _payload_for())
+
+    outputs = _parse_github_output(output.read_text())
+    # Only the open config applies; the restricted one is skipped with a
+    # warning rather than failing the run.
+    assert outputs["environment"] == "dev"
+    assert any(
+        "not in its allowed_actors" in record.getMessage() for record in caplog.records
+    )
+
+
+def test_allowed_actors_users_match_case_insensitively(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    client_payload = _payload_for()
+    config_path.write_text(
+        f"""
+defaults:
+  allowed_actors:
+    users: [{client_payload.source.actor.upper()}]
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+"""
+    )
+
+    _run_bump(config_path, client_payload)
+
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "false"
+
+
+def test_allowed_actors_team_member_is_allowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_TOKEN", "gh_token")
+
+    calls: list[tuple[str, str, str, str]] = []
+
+    def fake_is_team_member(
+        org: str, team_slug: str, username: str, token: str
+    ) -> bool:
+        calls.append((org, team_slug, username, token))
+        return True
+
+    monkeypatch.setattr("odp_releaser.bump_images.is_team_member", fake_is_team_member)
+
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      allowed_actors:
+        teams: [acme/deployers]
+"""
+    )
+
+    client_payload = _payload_for()
+    _run_bump(config_path, client_payload)
+
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "false"
+    assert calls == [("acme", "deployers", client_payload.source.actor, "gh_token")]
+
+
+def test_allowed_actors_team_non_member_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "gh_token")
+    monkeypatch.setattr(
+        "odp_releaser.bump_images.is_team_member",
+        lambda *_args: False,
+    )
+
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      allowed_actors:
+        teams: [acme/deployers]
+"""
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        _run_bump(config_path, _payload_for())
+    assert excinfo.value.exit_code == 1
+
+
+def test_allowed_actors_team_without_token_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      allowed_actors:
+        teams: [acme/deployers]
+"""
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        _run_bump(config_path, _payload_for())
+
+    assert excinfo.value.exit_code == 1
+    stderr = capsys.readouterr().err
+    assert "GITHUB_TOKEN" in stderr
+    assert "acme/deployers" in stderr
+
+
+def test_allowed_actors_malformed_team_entry_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "gh_token")
+
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      allowed_actors:
+        teams: [deployers]
+"""
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        _run_bump(config_path, _payload_for())
+
+    assert excinfo.value.exit_code == 1
+    assert "org/team-slug" in capsys.readouterr().err
+
+
+def test_yaml_merge_key_shares_allowlists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """ruamel resolves `<<: *anchor` before pydantic sees the config."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    client_payload = _payload_for()
+    config_path.write_text(
+        f"""
+x-guards: &guards
+  allowed_source_repos: [{client_payload.repo}]
+  allowed_actors:
+    users: [{client_payload.source.actor}]
+images:
+  gmri/neracoos-mariners-dashboard:
+    - <<: *guards
+      events: [push]
+"""
+    )
+
+    _run_bump(config_path, client_payload)
+
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["changed"] == "false"
+
+
+def test_reviewers_from_defaults_flow_into_outputs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+defaults:
+  reviewers: [alice, bob]
+  team_reviewers: [deployers]
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      update_mode: pull_request
+"""
+    )
+
+    _run_bump(config_path, _payload_for())
+
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["reviewers"] == "alice,bob"
+    assert outputs["team_reviewers"] == "deployers"
+
+
+def test_reviewers_config_replaces_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+defaults:
+  reviewers: [alice, bob]
+  team_reviewers: [deployers]
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      update_mode: pull_request
+      reviewers: [carol]
+      team_reviewers: []
+"""
+    )
+
+    _run_bump(config_path, _payload_for())
+
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["reviewers"] == "carol"
+    # The config's explicit empty list replaces the default, not falls
+    # back to it.
+    assert outputs["team_reviewers"] == ""
+
+
+def test_mixed_reviewers_warn_and_use_first(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      update_mode: pull_request
+      reviewers: [alice]
+    - events: [push]
+      update_mode: pull_request
+      reviewers: [bob]
+"""
+    )
+
+    with caplog.at_level(logging.WARNING, logger="odp-releaser"):
+        _run_bump(config_path, _payload_for())
+
+    outputs = _parse_github_output(output.read_text())
+    assert outputs["reviewers"] == "alice"
+    assert any(
+        "Mixed reviewers values" in record.getMessage() for record in caplog.records
+    )
 
 
 def test_mixed_update_mode_warns_and_prefers_pull_request(

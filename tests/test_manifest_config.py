@@ -36,6 +36,9 @@ def test_example_yaml_attaches_field_descriptions_as_comments() -> None:
     # Field descriptions appear as comments before their keys.
     assert "# Mapping of image names to their configurations" in text
     assert "# Full repo names (owner/name) allowed to trigger bumps" in text
+    assert "# Users and teams allowed to trigger bumps" in text
+    assert "# GitHub usernames, compared case-insensitively" in text
+    assert "# GitHub usernames requested as reviewers on bump pull" in text
     # Nested model field descriptions recurse.
     assert "# Whether the kustomize images entry pins the tag" in text
     assert "# Relative path to the Helm values file" in text
@@ -54,6 +57,10 @@ def test_example_yaml_emits_each_comment_only_once() -> None:
     assert text.count("dagster_user_code:") == 2
     assert text.count("# When true, update the image.tag of every entry") == 1
     assert text.count("# A generic YAML or JSON manifest updated purely") == 1
+    # AllowedActors appears under defaults and on the first image config;
+    # its field comments render only on the first occurrence.
+    assert text.count("users:") == 2
+    assert text.count("# GitHub usernames, compared case-insensitively") == 1
 
 
 def test_example_yaml_round_trips_ignoring_comments() -> None:

@@ -5,8 +5,9 @@
 # from this repo). The two images cover both update modes and both kustomize
 # pin styles; their placeholder tag/digest always differ from the generated
 # payload's, so `changed` is always "true".
-allowed_source_repos:
-  - gulfofmaine/odp-releaser
+defaults:
+  allowed_source_repos:
+    - gulfofmaine/odp-releaser
 images:
   ghcr.io/gulfofmaine/odp-releaser-e2e-commit:
     - events:
@@ -17,6 +18,7 @@ images:
     - events:
         - workflow_dispatch
       update_mode: pull_request
+      reviewers: [odp-releaser-e2e-reviewer]
       kustomize_manifests:
         - path: ./manifests/pr.kustomization.yaml
           pin: digest

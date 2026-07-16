@@ -72,8 +72,11 @@ inputs:
     default: "false"
   token:
     description: >-
-      Token used to push the bump commit or open the pull request. Pass an
-      app-minted token if the resulting commit/PR should trigger CI.
+      Token used to push the bump commit or open the pull request, and to check
+      `allowed_actors` team membership. Pass an app-minted token if the
+      resulting commit/PR should trigger CI. Team entries in `allowed_actors`
+      and `team_reviewers` both need an app or PAT token with organization
+      members read access — the default GITHUB_TOKEN can do neither.
     required: false
     default: ${{ github.token }}
 
@@ -119,6 +122,16 @@ outputs:
   pr_body:
     description: Generated pull request body for the bump.
     value: ${{ steps.bump.outputs.pr_body }}
+  reviewers:
+    description:
+      Comma-separated GitHub usernames requested as reviewers on the bump pull
+      request; empty when none are configured.
+    value: ${{ steps.bump.outputs.reviewers }}
+  team_reviewers:
+    description:
+      Comma-separated GitHub team slugs requested as reviewers on the bump pull
+      request; empty when none are configured.
+    value: ${{ steps.bump.outputs.team_reviewers }}
 
 runs:
   using: composite
@@ -131,6 +144,9 @@ runs:
         CLIENT_PAYLOAD: ${{ inputs.client_payload }}
         VERBOSITY: ${{ inputs.verbosity }}
         DRY_RUN: ${{ inputs.dry_run }}
+        # Only used to check `allowed_actors` team membership; the CLI makes
+        # no other API calls.
+        GITHUB_TOKEN: ${{ inputs.token }}
       run: |
         if ! command -v odp-releaser >/dev/null; then
           echo "::error::odp-releaser CLI not found on the PATH; run the" \
@@ -189,3 +205,7 @@ runs:
         committer: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
         author: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
         delete-branch: true
+        # Empty values are treated as "not provided" upstream, so these are
+        # safe to pass unconditionally.
+        reviewers: ${{ steps.bump.outputs.reviewers }}
+        team-reviewers: ${{ steps.bump.outputs.team_reviewers }}
