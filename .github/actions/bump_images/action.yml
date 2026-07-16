@@ -63,6 +63,13 @@ inputs:
       The image's update_mode is ignored.
     required: false
     default: "false"
+  dry_run:
+    description: >-
+      When "true", run the CLI with --dry-run (no manifest files written) and
+      skip the stage, commit, and pull-request steps. Outputs are still
+      produced. Testing aid; used by this repo's own e2e CI.
+    required: false
+    default: "false"
   token:
     description: >-
       Token used to push the bump commit or open the pull request. Pass an
@@ -108,6 +115,7 @@ runs:
         IMAGE_MANIFEST_CONFIG_PATH: ${{ inputs.config_path }}
         CLIENT_PAYLOAD: ${{ inputs.client_payload }}
         VERBOSITY: ${{ inputs.verbosity }}
+        DRY_RUN: ${{ inputs.dry_run }}
       run: |
         if ! command -v odp-releaser >/dev/null; then
           echo "::error::odp-releaser CLI not found on the PATH; run the" \
@@ -120,17 +128,24 @@ runs:
           2) FLAGS=(-vv) ;;
           *) FLAGS=(-vvv) ;;
         esac
-        odp-releaser "${FLAGS[@]}" bump-images
+        BUMP_ARGS=()
+        if [ "$DRY_RUN" = "true" ]; then
+          BUMP_ARGS+=(--dry-run)
+        fi
+        odp-releaser "${FLAGS[@]}" bump-images "${BUMP_ARGS[@]}"
 
     - name: Stage bump
-      if: inputs.stage_only == 'true' && steps.bump.outputs.changed == 'true'
+      if:
+        inputs.dry_run != 'true' && inputs.stage_only == 'true' &&
+        steps.bump.outputs.changed == 'true'
       shell: bash
       run: git add -A
 
     - name: Commit bump
       if:
-        inputs.stage_only != 'true' && steps.bump.outputs.changed == 'true' &&
-        steps.bump.outputs.update_mode == 'commit'
+        inputs.dry_run != 'true' && inputs.stage_only != 'true' &&
+        steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
+        == 'commit'
       shell: bash
       env:
         GIT_USER_NAME: ${{ inputs.git_user_name }}
@@ -145,8 +160,9 @@ runs:
 
     - name: Open bump pull request
       if:
-        inputs.stage_only != 'true' && steps.bump.outputs.changed == 'true' &&
-        steps.bump.outputs.update_mode == 'pull_request'
+        inputs.dry_run != 'true' && inputs.stage_only != 'true' &&
+        steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
+        == 'pull_request'
       uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1 # zizmor: ignore[superfluous-actions]
       with:
         token: ${{ inputs.token }}

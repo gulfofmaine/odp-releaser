@@ -58,6 +58,22 @@ on:
         required: false
         type: number
         default: 1
+      client_payload:
+        description: >-
+          Explicit client_payload JSON string. Empty (the default) uses the
+          triggering repository_dispatch event's client_payload. Testing aid for
+          calling this workflow outside a repository_dispatch run.
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: >-
+          Run the CLI with --dry-run (no manifest files written) and skip the
+          commit and pull-request steps. Outputs are still produced. Testing
+          aid; used by this repo's own e2e CI.
+        required: false
+        type: boolean
+        default: false
     outputs:
       image_name:
         description: Image name the bump ran for (no tag or digest).
@@ -66,8 +82,20 @@ on:
         description: Digest (sha256:...) of the image the bump ran for.
         value: ${{ jobs.bump.outputs.digest }}
       changed:
-        description: Whether any manifests changed ("true"/"false").
+        description: Whether any manifest content changed ("true"/"false").
         value: ${{ jobs.bump.outputs.changed }}
+      update_mode:
+        description: Resolved update mode ("commit" or "pull_request").
+        value: ${{ jobs.bump.outputs.update_mode }}
+      branch_name:
+        description: Branch name a pull_request-mode bump uses.
+        value: ${{ jobs.bump.outputs.branch_name }}
+      commit_message:
+        description: Full commit message for the bump.
+        value: ${{ jobs.bump.outputs.commit_message }}
+      pr_title:
+        description: Title for the bump pull request.
+        value: ${{ jobs.bump.outputs.pr_title }}
     secrets:
       ci_app_id:
         description: >-
@@ -90,12 +118,21 @@ jobs:
     env:
       HAS_CI_APP: ${{ secrets.ci_app_id != '' }}
     concurrency:
-      group: odp-releaser-${{ github.event.client_payload.image_name }}
+      # client_payload.image_name is empty when this workflow is called
+      # outside a repository_dispatch run (e.g. this repo's e2e CI); fall
+      # back to a run-scoped group so unrelated runs never share a queue.
+      group:
+        odp-releaser-${{ github.event.client_payload.image_name || github.run_id
+        }}
       cancel-in-progress: false
     outputs:
       image_name: ${{ steps.bump.outputs.image_name }}
       digest: ${{ steps.bump.outputs.digest }}
       changed: ${{ steps.bump.outputs.changed }}
+      update_mode: ${{ steps.bump.outputs.update_mode }}
+      branch_name: ${{ steps.bump.outputs.branch_name }}
+      commit_message: ${{ steps.bump.outputs.commit_message }}
+      pr_title: ${{ steps.bump.outputs.pr_title }}
     steps:
       - name: Generate app token
         id: app-token
@@ -142,8 +179,11 @@ jobs:
         id: bump
         uses: ./.odp-releaser/.github/actions/bump_images
         with:
+          client_payload:
+            ${{ inputs.client_payload || toJSON(github.event.client_payload) }}
           config_path: ${{ inputs.config_path }}
           verbosity: ${{ inputs.verbosity }}
           git_user_name: ${{ inputs.git_user_name }}
           git_user_email: ${{ inputs.git_user_email }}
+          dry_run: ${{ inputs.dry_run }}
           token: ${{ steps.app-token.outputs.token || github.token }}

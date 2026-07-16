@@ -1,0 +1,9 @@
+# E2E fixture: bumped in pull_request mode with `pin: digest`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: odp-releaser-e2e
+resources:
+  - deployment.yaml
+images:
+  - name: ghcr.io/gulfofmaine/odp-releaser-e2e-pr
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"

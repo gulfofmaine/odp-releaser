@@ -10,6 +10,7 @@ import ruamel.yaml
 import typer
 import typer.testing
 from pydantic import ValidationError
+from test_bump_image import _parse_github_output
 
 from odp_releaser.main import app
 from odp_releaser.make_payload import build_payload
@@ -119,7 +120,7 @@ def test_notify_missing_targets_file_exits_nonzero(tmp_path: Path) -> None:
     assert "generate-config deploy-targets" in output
 
 
-def test_notify_empty_targets_array(tmp_path: Path) -> None:
+def test_notify_empty_targets_array_exits_nonzero(tmp_path: Path) -> None:
     summary = tmp_path / "summary"
     targets = tmp_path / "deploy_targets.yaml"
     targets.write_text("[]")
@@ -131,11 +132,13 @@ def test_notify_empty_targets_array(tmp_path: Path) -> None:
         env=_env(tmp_path, targets_path=targets, summary_path=summary),
     )
 
-    assert result.exit_code == 0, result.output
-    assert "No deploy targets configured" in summary.read_text()
+    assert result.exit_code != 0
+    output = result.output or result.stderr
+    assert "No deploy targets configured" in output
+    assert "generate-config deploy-targets" in output
 
 
-def test_notify_empty_file_exits_zero(tmp_path: Path) -> None:
+def test_notify_empty_file_exits_nonzero(tmp_path: Path) -> None:
     summary = tmp_path / "summary"
     targets = tmp_path / "deploy_targets.yaml"
     targets.write_text("")
@@ -147,8 +150,9 @@ def test_notify_empty_file_exits_zero(tmp_path: Path) -> None:
         env=_env(tmp_path, targets_path=targets, summary_path=summary),
     )
 
-    assert result.exit_code == 0, result.output
-    assert "No deploy targets configured" in summary.read_text()
+    assert result.exit_code != 0
+    output = result.output or result.stderr
+    assert "No deploy targets configured" in output
 
 
 # --- successful dispatch -----------------------------------------------------
@@ -165,11 +169,13 @@ def test_notify_two_targets_succeed(tmp_path: Path, rsa_private_key: str) -> Non
         ],
     )
 
+    github_output = tmp_path / "output"
     env = _env(
         tmp_path,
         targets_path=targets,
         summary_path=summary,
         DISPATCH_APPS=_dispatch_apps(rsa_private_key, ["acme", "other"]),
+        GITHUB_OUTPUT=str(github_output),
     )
 
     with respx.mock(base_url=API) as router:
@@ -194,6 +200,25 @@ def test_notify_two_targets_succeed(tmp_path: Path, rsa_private_key: str) -> Non
     assert summary_text.count("| OK ") == 2
     assert "acme/widgets" in summary_text
     assert "other/gadgets" in summary_text
+
+    outputs = _parse_github_output(github_output.read_text())
+    assert outputs["target_count"] == "2"
+    assert json.loads(outputs["results"]) == [
+        {
+            "owner": "acme",
+            "repo": "widgets",
+            "event_type": "image-published",
+            "ok": True,
+            "detail": "dispatched",
+        },
+        {
+            "owner": "other",
+            "repo": "gadgets",
+            "event_type": "image-published",
+            "ok": True,
+            "detail": "dispatched",
+        },
+    ]
 
 
 def test_notify_json_targets_file_still_parses(
@@ -245,11 +270,13 @@ def test_notify_one_missing_credentials_still_dispatches_other(
     )
 
     # Only "acme" has credentials; "other" has none and no default is set.
+    github_output = tmp_path / "output"
     env = _env(
         tmp_path,
         targets_path=targets,
         summary_path=summary,
         DISPATCH_APPS=_dispatch_apps(rsa_private_key, ["acme"]),
+        GITHUB_OUTPUT=str(github_output),
     )
 
     with respx.mock(base_url=API) as router:
@@ -265,6 +292,15 @@ def test_notify_one_missing_credentials_still_dispatches_other(
     assert summary_text.count("| OK ") == 1
     assert summary_text.count("| FAILED ") == 1
     assert "other/gadgets" in summary_text
+
+    outputs = _parse_github_output(github_output.read_text())
+    assert outputs["target_count"] == "2"
+    results = json.loads(outputs["results"])
+    assert [(entry["repo"], entry["ok"]) for entry in results] == [
+        ("widgets", True),
+        ("gadgets", False),
+    ]
+    assert "No dispatch app credentials" in results[1]["detail"]
 
 
 # --- dry run -----------------------------------------------------------------
@@ -283,11 +319,13 @@ def test_notify_dry_run_makes_no_http_calls(
         ],
     )
 
+    github_output = tmp_path / "output"
     env = _env(
         tmp_path,
         targets_path=targets,
         summary_path=summary,
         DISPATCH_APPS=_dispatch_apps(rsa_private_key, ["acme", "other"]),
+        GITHUB_OUTPUT=str(github_output),
     )
 
     with respx.mock(base_url=API) as router:
@@ -301,6 +339,12 @@ def test_notify_dry_run_makes_no_http_calls(
     assert result.exit_code == 0, result.output
     summary_text = summary.read_text()
     assert summary_text.count("| OK ") == 2
+
+    outputs = _parse_github_output(github_output.read_text())
+    assert outputs["target_count"] == "2"
+    results = json.loads(outputs["results"])
+    assert all(entry["ok"] for entry in results)
+    assert all(entry["detail"] == "dry run (not sent)" for entry in results)
 
 
 # --- invalid targets ---------------------------------------------------------
@@ -463,7 +507,7 @@ def test_test_notify_missing_targets_file_exits_nonzero(tmp_path: Path) -> None:
     assert "No deploy targets file" in output
 
 
-def test_test_notify_empty_targets_file_exits_zero(tmp_path: Path) -> None:
+def test_test_notify_empty_targets_file_exits_nonzero(tmp_path: Path) -> None:
     targets = tmp_path / "deploy_targets.yaml"
     targets.write_text("[]")
 
@@ -483,7 +527,9 @@ def test_test_notify_empty_targets_file_exits_zero(tmp_path: Path) -> None:
         env={},
     )
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code != 0
+    output = result.output or result.stderr
+    assert "No deploy targets configured" in output
 
 
 def test_test_notify_defaults_to_info_logging(

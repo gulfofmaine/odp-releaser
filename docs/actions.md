@@ -119,6 +119,7 @@ jobs:
 | `git_user_name` | no | `odp-releaser[bot]` | Git author/committer name for direct commits. |
 | `git_user_email` | no | `odp-releaser[bot]@users.noreply.github.com` | Git author/committer email for direct commits. |
 | `stage_only` | no | `"false"` | When `"true"`, write the manifest changes and `git add` them, but make no commit and open no pull request. |
+| `dry_run` | no | `"false"` | Testing aid: run the CLI with `--dry-run` (no manifest files written) and skip the stage, commit, and pull-request steps. Outputs are still produced. |
 | `token` | no | `${{ github.token }}` | Token used to push the bump commit or open the pull request. Pass an app-minted token if the resulting commit/PR should trigger CI (see [the `ci_app_*` note](workflows.md#the-ci_app_-pr-ci-triggering-note)). |
 
 ### Outputs
