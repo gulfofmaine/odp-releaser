@@ -82,8 +82,8 @@ on:
     outputs:
       results:
         description: >-
-          JSON array of per-target dispatch results, each
-          {owner, repo, event_type, ok, detail}.
+          JSON array of per-target dispatch results, each {owner, repo,
+          event_type, ok, detail}.
         value: ${{ jobs.notify.outputs.results }}
       target_count:
         description: Number of deploy targets that were attempted.
