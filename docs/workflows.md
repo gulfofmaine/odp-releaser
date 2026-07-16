@@ -37,6 +37,9 @@ sequenceDiagram
     else update_mode: pr
         Deploy->>Deploy: open a pull request
     end
+    opt reporter app configured
+        Deploy->>Source: create deployment + status at built commit
+    end
     Deploy->>Argo: new manifests available
     Argo->>Argo: sync manifests to the cluster
 ```
@@ -169,6 +172,9 @@ jobs:
     secrets:
       ci_app_id: ${{ secrets.CI_APP_ID }} # optional
       ci_app_private_key: ${{ secrets.CI_APP_PRIVATE_KEY }} # optional
+      reporter_app_id: ${{ secrets.REPORTER_APP_ID }} # optional
+      reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }} # optional
+      # reporter_apps: ${{ secrets.REPORTER_APPS }}    # optional multi-org
 ```
 
 Set the `concurrency` group at the **caller** level too (as above) — a burst
@@ -193,6 +199,9 @@ succession.
 | --- | --- | --- |
 | `ci_app_id` | no | App ID of this repo's own GitHub App. When set, the commit/PR is authored with an app token instead of `GITHUB_TOKEN`. |
 | `ci_app_private_key` | no | Private key matching `ci_app_id`. |
+| `reporter_app_id` | no | App ID of the source org's reporter GitHub App. When set, a successful bump is reported back to the source repo as a GitHub deployment + status. |
+| `reporter_app_private_key` | no | Private key matching `reporter_app_id`. |
+| `reporter_apps` | no | JSON object mapping source `owner -> {app_id, private_key}` for reporting to source repos across multiple orgs. |
 
 ### `commit` vs `pull_request`
 
@@ -203,6 +212,36 @@ Each image in `.github/image_manifest.yaml` sets `update_mode: commit`
 checked-out branch (normally the default branch); in `pull_request` mode it
 opens (or updates) a pull request on a stable branch named
 `odp-releaser/bump-<image_name>` via `peter-evans/create-pull-request`.
+
+### Reporting deployments back to the source repo
+
+When the `reporter_app_id` / `reporter_app_private_key` (or `reporter_apps`)
+secrets are set, a final step runs `odp-releaser report-deployment` after a
+successful bump. It creates a
+[GitHub deployment](https://docs.github.com/en/rest/deployments/deployments)
+on the **source** repository at the commit that built the image
+(`client_payload.git_sha`) and sets its status, so the source repo's pull
+request timeline and Environments sidebar show where the image went.
+
+- The deployment **state** mirrors what happened on the deploy side:
+  `success` when the bump was committed directly, `queued` when a bump pull
+  request was opened but not yet merged. Note this records that the manifest
+  change landed — whether ArgoCD has synced it to a cluster is downstream of
+  this tool.
+- The **environment name** defaults to the deploy repo's `owner/name` slug;
+  set `environment` in `.github/image_manifest.yaml` to override it (see
+  [Image manifest config](config/image_manifest.md)).
+- The "View deployment" link points at the bump commit (`commit` mode) or
+  the bump pull request (`pull_request` mode); the logs link points at the
+  bump workflow run.
+- Reporting is **best-effort**: the step runs with `continue-on-error`, so a
+  failed report never fails the bump itself.
+
+The credentials belong to a source-org-owned **reporter app** with
+`Deployments: Read and write` on the source repos — the mirror image of the
+dispatch app. See
+[GitHub Apps](github_apps.md#reporter-apps) for how to create one and share
+its key.
 
 ### The `ci_app_*` PR-CI-triggering note
 

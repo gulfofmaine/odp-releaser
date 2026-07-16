@@ -28,7 +28,8 @@ each source org it trusts. That ownership model buys a real trust boundary:
   a known, small repo list.
 
 The rest of this page covers the two sides of that relationship, the token
-flow the CLI runs on every dispatch, and a reserved v2 concept.
+flow the CLI runs on every dispatch, and the symmetric **reporter app** that
+lets a deploy repo report deployments back onto the source repo.
 
 ## For deploy org admins
 
@@ -170,13 +171,67 @@ run, and are never logged or written to disk — only exception messages,
 `owner`/`repo`/`event_type`, and (at debug level) the client payload itself
 are logged.
 
-## Future: commenter apps (v2)
+## Reporter apps
 
 The dispatch app role only ever pushes information one direction: source →
-deploy. A reserved, symmetric **commenter app** role is planned for a future
-release — owned by the *source* org instead, installed on source repos with
-`pull-requests: write`, so a deploy repo could report back onto the source
-pull request where an image ended up being deployed. The seam for this
-already exists in the codebase
-(`odp_releaser.github.upsert_pr_comment`), but it currently raises
-`NotImplementedError` — `comment-on-pr` is not implemented in this release.
+deploy. The symmetric **reporter app** role closes the loop in the other
+direction: after `bump-images` lands a manifest change, the deploy repo can
+report a [GitHub deployment](https://docs.github.com/en/rest/deployments/deployments)
+back onto the source repository at the commit that built the image. The
+source repo's pull request timeline then shows "deployed to *environment*"
+entries, and its Environments sidebar shows the latest deployed commit per
+deploy repo — with no comment formatting or notification plumbing.
+
+The ownership model mirrors the dispatch app, with the orgs swapped:
+
+- The **source org** owns and runs the reporter app, installs it only on its
+  own source repos, and hands a private key to each deploy org it wants
+  reports from.
+- The app needs a single repository permission: `Deployments: Read and
+  write`. Webhooks off, same as the dispatch app.
+- Suggested name pattern: `<org>-odp-reporter`.
+
+### For source org admins
+
+Follow the same steps as the dispatch app above — create the org-level app
+(with `Deployments: Read and write` instead of contents/PR permissions),
+install it on the source repos that should receive deployment reports, and
+generate one private key per deploy org you trust. Revocation and rotation
+work identically.
+
+One caveat: creating a deployment fires a `deployment` webhook/Actions event
+in the source repo. That's harmless unless a source workflow triggers `on:
+deployment` — check before installing if your source repos have such
+workflows.
+
+### For deploy repo maintainers
+
+Store the reporter credentials as GitHub Actions secrets in the deploy repo
+(or org), mirroring the dispatch pair on the other side:
+
+- **Single source org**: `REPORTER_APP_ID` and `REPORTER_APP_PRIVATE_KEY`,
+  used as the default credentials for any source repo.
+- **Multiple source orgs**: a `REPORTER_APPS` secret — a JSON object mapping
+  each source owner to its own `{app_id, private_key}`, with the default
+  pair as fallback (the same resolution order as `DISPATCH_APPS`).
+
+Pass them to `bump-images.yml` as the `reporter_app_id` /
+`reporter_app_private_key` / `reporter_apps` secrets — see
+[Bump images](workflows.md#bump-images). Reporting is best-effort: a failed
+report never fails the bump itself.
+
+The token flow matches the dispatch flow, with the direction reversed and a
+narrower grant: `odp-releaser report-deployment` resolves the *source*
+owner's reporter credentials, finds the app's installation on the single
+source repo, and mints a one-hour token scoped to that repo with
+`permissions: {deployments: write}` — nothing else. It then creates the
+deployment at the payload's `git_sha` and sets its status (`success` for a
+direct commit, `queued` for a bump pull request that still needs review).
+
+### Future: PR comments (v2)
+
+A reserved **commenter** extension of the reporter role — posting a comment
+on the source pull request in addition to the deployment — is still planned.
+The seam exists in the codebase (`odp_releaser.github.upsert_pr_comment`),
+but it currently raises `NotImplementedError`; a reporter app would need
+`Pull requests: Read and write` added for it once implemented.

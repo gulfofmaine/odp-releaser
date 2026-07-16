@@ -137,6 +137,17 @@ class ManifestConfig(BaseModel):
         ),
     ] = None
 
+    environment: Annotated[
+        str | None,
+        Field(
+            description=(
+                "GitHub environment name used when reporting deployments "
+                "back to source repos (`report-deployment`); defaults to "
+                "this deploy repo's owner/name slug"
+            ),
+        ),
+    ] = None
+
     @classmethod
     def generate_yaml(cls) -> str:
         """Render the bundled :data:`EXAMPLE_MANIFEST` as commented YAML."""

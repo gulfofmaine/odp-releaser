@@ -12,6 +12,11 @@
 # Pushes/PRs authored with the default GITHUB_TOKEN do not trigger further
 # workflow runs by GitHub Actions design.
 #
+# When the source org's reporter-app credentials are supplied (via the
+# reporter_app_id / reporter_app_private_key secrets), a successful bump is
+# also reported back to the source repo as a GitHub deployment + status, so
+# the source PR timeline and Environments sidebar show where the image went.
+#
 # Minimal caller example:
 #
 #   on:
@@ -29,6 +34,9 @@
 #       secrets:
 #         ci_app_id: ${{ secrets.CI_APP_ID }}                   # optional
 #         ci_app_private_key: ${{ secrets.CI_APP_PRIVATE_KEY }} # optional
+#         reporter_apps: ${{ secrets.REPORTER_APPS }}           # optional
+#         reporter_app_id: ${{ secrets.REPORTER_APP_ID }}       # optional
+#         reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }} # optional
 
 name: Bump images
 
@@ -66,6 +74,21 @@ on:
       ci_app_private_key:
         description: Optional private key matching ci_app_id.
         required: false
+      reporter_apps:
+        description: >-
+          Optional JSON object mapping source owner -> {app_id, private_key}
+          reporter app credentials, for deploy repos that receive dispatches
+          from multiple source orgs.
+        required: false
+      reporter_app_id:
+        description: >-
+          Optional App ID of the source org's reporter GitHub App. When set
+          (with reporter_app_private_key), a successful bump is reported back to
+          the source repo as a GitHub deployment + status.
+        required: false
+      reporter_app_private_key:
+        description: Optional private key matching reporter_app_id.
+        required: false
 
 permissions: {}
 
@@ -78,6 +101,8 @@ jobs:
       pull-requests: write # open the bump pull request
     env:
       HAS_CI_APP: ${{ secrets.ci_app_id != '' }}
+      HAS_REPORTER_APP:
+        ${{ secrets.reporter_app_id != '' || secrets.reporter_apps != '' }}
     concurrency:
       group: odp-releaser-${{ github.event.client_payload.image_name }}
       cancel-in-progress: false
@@ -147,6 +172,7 @@ jobs:
           git push
 
       - name: Open bump pull request
+        id: bump-pr
         if:
           steps.bump.outputs.changed == 'true' && steps.bump.outputs.update_mode
           == 'pull_request'
@@ -160,3 +186,32 @@ jobs:
           committer: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
           author: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
           delete-branch: true
+
+      - name: Report deployment to source repo
+        # Best effort: a failed report should never fail the bump itself.
+        if:
+          env.HAS_REPORTER_APP == 'true' && steps.bump.outputs.changed == 'true'
+        continue-on-error: true
+        env:
+          CLIENT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          IMAGE_MANIFEST_CONFIG_PATH: ${{ inputs.config_path }}
+          UPDATE_MODE: ${{ steps.bump.outputs.update_mode }}
+          PR_URL: ${{ steps.bump-pr.outputs.pull-request-url }}
+          REPORTER_APPS: ${{ secrets.reporter_apps }}
+          REPORTER_APP_ID: ${{ secrets.reporter_app_id }}
+          REPORTER_APP_PRIVATE_KEY: ${{ secrets.reporter_app_private_key }}
+          VERBOSITY: ${{ inputs.verbosity }}
+        run: |
+          case "$VERBOSITY" in
+            0) FLAGS=() ;;
+            1) FLAGS=(-v) ;;
+            2) FLAGS=(-vv) ;;
+            *) FLAGS=(-vvv) ;;
+          esac
+          if [ -n "$PR_URL" ]; then
+            ENVIRONMENT_URL="$PR_URL"
+          else
+            ENVIRONMENT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/$(git rev-parse HEAD)"
+          fi
+          export ENVIRONMENT_URL
+          odp-releaser "${FLAGS[@]}" report-deployment
