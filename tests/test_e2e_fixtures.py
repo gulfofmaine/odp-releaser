@@ -12,11 +12,11 @@ from pathlib import Path
 
 import pytest
 import typer.testing
+from test_bump_image import _parse_github_output
 
 from odp_releaser.bump_images import bump_images
 from odp_releaser.main import app
 from odp_releaser.notify import load_targets
-from test_bump_image import _parse_github_output
 
 E2E_DIR = Path(__file__).parent / "e2e"
 TAG = "e2e-0123456"
