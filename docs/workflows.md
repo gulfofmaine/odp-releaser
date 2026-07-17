@@ -214,11 +214,11 @@ succession.
 
 | Secret | Required | Description |
 | --- | --- | --- |
-| `ci_app_id` | no | App ID of this repo's own GitHub App. When set, the commit/PR is authored with an app token instead of `GITHUB_TOKEN`. |
+| `ci_app_id` | no | App ID of this repo's own GitHub App. When set, the commit/PR is authored with an app token instead of `GITHUB_TOKEN`. Also needed for `team_reviewers` in the image manifest config: when that key is present, the token is minted with organization "Members: read" added, so the app must be granted that permission. |
 | `ci_app_private_key` | no | Private key matching `ci_app_id`. |
-| `reporter_app_id` | no | App ID of the source org's reporter GitHub App. When set, a successful bump is reported back to the source repo as a GitHub deployment + status. |
+| `reporter_app_id` | no | App ID of the source org's reporter GitHub App. When set, a successful bump is reported back to the source repo as a GitHub deployment + status, and `allowed_actors` team membership is checked with it (needs organization "Members: read"). |
 | `reporter_app_private_key` | no | Private key matching `reporter_app_id`. |
-| `reporter_apps` | no | JSON object mapping source `owner -> {app_id, private_key}` for reporting to source repos across multiple orgs. |
+| `reporter_apps` | no | JSON object mapping source `owner -> {app_id, private_key}` for reporting to (and checking `allowed_actors` teams against) source repos across multiple orgs. |
 
 ### Outputs
 
@@ -233,6 +233,8 @@ succession.
 | `branch_name` | Branch name a `pull_request`-mode bump uses (`odp-releaser/bump-<image_name>`). |
 | `commit_message` | Full commit message for the bump. |
 | `pr_title` | Title for the bump pull request. |
+| `reviewers` | Comma-separated GitHub usernames requested as reviewers on the bump pull request; empty when none are configured. |
+| `team_reviewers` | Comma-separated GitHub team slugs requested as reviewers on the bump pull request; empty when none are configured. |
 
 Follow-up jobs in the calling workflow can consume these, e.g.:
 
@@ -266,6 +268,24 @@ checked-out branch (normally the default branch); in `pull_request` mode it
 opens (or updates) a pull request on a stable branch named
 `odp-releaser/bump-<image_name>` via `peter-evans/create-pull-request`.
 
+### Requesting reviewers on bump pull requests
+
+`pull_request`-mode bumps can request reviews: set `reviewers` (GitHub
+usernames) and/or `team_reviewers` (team slugs, no org prefix) — per image
+config, or under `defaults:` to apply to every config. A config's own list
+replaces the default (an explicit `[]` requests none); when several matching
+configs disagree, the first in config order wins with a warning, mirroring
+how `environment` resolves.
+
+Requesting a **team** review needs a token with organization "Members:
+read" — the default `GITHUB_TOKEN` can't do it. The workflow handles this
+automatically: when the checked-out image manifest contains a
+`team_reviewers` key, the `ci_app_id` app token is minted with that
+permission added (grant the app the organization "Members: read" permission
+first; without `ci_app_*` secrets team reviews can't be requested). One
+upstream caveat from `peter-evans/create-pull-request`: a requested reviewer
+who is the PR's author causes the request-review call to fail.
+
 ### Reporting deployments back to the source repo
 
 When the `reporter_app_id` / `reporter_app_private_key` (or `reporter_apps`)
@@ -286,13 +306,14 @@ request timeline and Environments sidebar show where the image went.
   this tool.
 - The **environment name** defaults to the deploy repo's `owner/name` slug;
   set `environment` in `.github/image_manifest.yaml` — per image config, or
-  at the top level as a repo-wide default — to override it (see
+  under `defaults:` as a repo-wide default — to override it (see
   [Image manifest config](config/image_manifest.md)).
 - The **"View deployment" link** defaults to the bump commit (`commit` mode)
   or the bump pull request (`pull_request` mode); set `environment_url` in
-  the image manifest config — again per image config or top-level — to point
-  it at the running app instead (templated with `{new_tag}`, `{git_sha}`,
-  and `{digest}`). The logs link points at the bump workflow run.
+  the image manifest config — again per image config or under `defaults:` —
+  to point it at the running app instead (templated with `{new_tag}`,
+  `{git_sha}`, and `{digest}`). The logs link points at the bump workflow
+  run.
 - Reporting is **best-effort**: the step runs with `continue-on-error`, so a
   failed report never fails the bump itself.
 
@@ -411,17 +432,54 @@ commit: the checkout of this repo at `job.workflow_sha`, both
 [composite actions](actions.md), and the CLI they install from that
 checkout.
 
-## `client_payload.repo` and `allowed_source_repos`
+## Allowed source repos and actors
 
 Every dispatch carries `client_payload.repo` — the source repo's
-`owner/name` slug — as its stable identifier for "who sent this" (see
+`owner/name` slug — and `client_payload.source.actor` — the GitHub user who
+triggered the source build — as its identifiers for "who sent this" (see
 [Client Payload](client_payload.md)). A deploy repo's
-`.github/image_manifest.yaml` can set `allowed_source_repos` on the manifest
-config to an explicit list of trusted `owner/name` slugs; `bump-images`
-rejects (non-zero exit, no manifest changes) any payload whose `repo` isn't
-in that list. This is the deploy repo's own defense-in-depth check,
-independent of which source orgs the deploy org's dispatch app trusts — see
-[Image manifest config](config/image_manifest.md) for the field and
+`.github/image_manifest.yaml` can restrict both per `ImageConfig`:
+
+- `allowed_source_repos`: trusted `owner/name` slugs.
+- `allowed_actors`: a mapping with `users` (GitHub usernames, compared
+  case-insensitively) and/or `teams` (`org/team-slug` entries). Teams live
+  in the source orgs, so membership is checked with the same
+  [reporter app](github_apps.md#reporter-apps) credentials
+  (`reporter_apps` / `reporter_app_id` / `reporter_app_private_key`) that
+  deployment reporting uses — grant the reporter app the organization
+  "Members: read" permission for this.
+
+Both can also be set under `defaults:` to apply to every config; a config's
+own value replaces the default entirely (an empty list denies everyone).
+Leaving a resolved value unset disables that check.
+
+A config whose allowlists reject the payload is skipped with a warning, so
+other configs for the same image can still apply — e.g. anyone may bump a
+dev overlay while only release managers reach production. When every
+event-matched config for the image rejects the payload, `bump-images` fails
+(non-zero exit, no manifest changes) so unauthorized attempts are loud.
+
+To share allowlists between configs, use YAML anchors and merge keys —
+top-level `x-` keys are ignored by the schema:
+
+```yaml
+x-prod-guards: &prod-guards
+  allowed_source_repos: [gulfofmaine/Neracoos-1-Buoy-App]
+  allowed_actors:
+    users: [abkfenris]
+    teams: [gulfofmaine/deployers]
+
+images:
+  gmri/neracoos-mariners-dashboard:
+    - <<: *prod-guards
+      events: [release]
+      kustomize_manifests:
+        - ../apps/mariners/kustomization.yaml
+```
+
+This is the deploy repo's own defense-in-depth check, independent of which
+source orgs the deploy org's dispatch app trusts — see
+[Image manifest config](config/image_manifest.md) for the fields and
 [GitHub Apps](github_apps.md) for the credential-level trust boundary.
 
 ## Security notes

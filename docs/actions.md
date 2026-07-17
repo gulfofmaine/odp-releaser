@@ -122,7 +122,10 @@ jobs:
 | `git_user_email` | no | `odp-releaser[bot]@users.noreply.github.com` | Git author/committer email for direct commits. |
 | `stage_only` | no | `"false"` | When `"true"`, write the manifest changes and `git add` them, but make no commit and open no pull request. |
 | `dry_run` | no | `"false"` | Testing aid: run the CLI with `--dry-run` (no manifest files written) and skip the stage, commit, and pull-request steps. Outputs are still produced. |
-| `token` | no | `${{ github.token }}` | Token used to push the bump commit or open the pull request. Pass an app-minted token if the resulting commit/PR should trigger CI (see [the `ci_app_*` note](workflows.md#the-ci_app_-pr-ci-triggering-note)). |
+| `token` | no | `${{ github.token }}` | Token used to push the bump commit or open the pull request. Pass an app-minted token if the resulting commit/PR should trigger CI (see [the `ci_app_*` note](workflows.md#the-ci_app_-pr-ci-triggering-note)). When the image manifest configures `team_reviewers`, the token also needs organization "Members: read" to request the team reviews. |
+| `reporter_apps` | no | `""` | JSON object mapping source `owner -> {app_id, private_key}` reporter app credentials, used to check `allowed_actors` team membership against source orgs (the app needs organization "Members: read" there). |
+| `reporter_app_id` | no | `""` | App ID of the source org's reporter GitHub App, used to check `allowed_actors` team membership. Fallback for owners not in `reporter_apps`. |
+| `reporter_app_private_key` | no | `""` | Private key matching `reporter_app_id`. |
 
 ### Outputs
 
@@ -139,6 +142,8 @@ jobs:
 | `commit_message` | Generated commit message for the bump. |
 | `pr_title` | Generated pull request title for the bump. |
 | `pr_body` | Generated pull request body for the bump (includes the embedded [report metadata](#report_deployment)). |
+| `reviewers` | Comma-separated GitHub usernames requested as reviewers on the bump pull request; empty when none are configured. |
+| `team_reviewers` | Comma-separated GitHub team slugs requested as reviewers on the bump pull request; empty when none are configured. |
 
 ## `report_deployment`
 

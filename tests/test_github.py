@@ -5,14 +5,18 @@ import json
 import httpx
 import pytest
 import respx
+from githubkit.exception import RequestFailed
 
 from odp_releaser.github import (
     AppNotInstalledError,
+    AppNotInstalledOnOrgError,
     MissingCredentialsError,
     create_deployment,
     create_deployment_status,
     installation_token_for,
+    is_team_member,
     list_deployments,
+    org_installation_token_for,
     pr_for_commit,
     resolve_app_credentials,
     resolve_reporter_credentials,
@@ -178,6 +182,104 @@ def test_pr_for_commit_empty_returns_none() -> None:
         pr = pr_for_commit("acme/widgets", "abc123", "gh_token")
 
     assert pr is None
+
+
+# --- is_team_member -----------------------------------------------------------
+
+
+def test_is_team_member_active_membership() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/teams/deployers/memberships/octocat").mock(
+            return_value=httpx.Response(200, json={"state": "active", "role": "member"})
+        )
+
+        assert is_team_member("acme", "deployers", "octocat", "gh_token") is True
+
+
+def test_is_team_member_pending_membership_is_not_a_member() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/teams/deployers/memberships/octocat").mock(
+            return_value=httpx.Response(
+                200, json={"state": "pending", "role": "member"}
+            )
+        )
+
+        assert is_team_member("acme", "deployers", "octocat", "gh_token") is False
+
+
+def test_is_team_member_404_is_not_a_member() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/teams/deployers/memberships/octocat").mock(
+            return_value=httpx.Response(404, json={"message": "Not Found"})
+        )
+
+        assert is_team_member("acme", "deployers", "octocat", "gh_token") is False
+
+
+def test_is_team_member_other_errors_propagate() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/teams/deployers/memberships/octocat").mock(
+            return_value=httpx.Response(403, json={"message": "Forbidden"})
+        )
+
+        with pytest.raises(RequestFailed):
+            is_team_member("acme", "deployers", "octocat", "gh_token")
+
+
+# --- org_installation_token_for -----------------------------------------------
+
+
+def test_org_installation_token_for_mints_org_token(rsa_private_key: str) -> None:
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/installation").mock(
+            return_value=httpx.Response(200, json={"id": 999})
+        )
+        token_route = router.post("/app/installations/999/access_tokens").mock(
+            return_value=httpx.Response(
+                201,
+                json={"token": "ghs_org", "expires_at": "2026-01-01T00:00:00Z"},
+            )
+        )
+
+        token = org_installation_token_for(
+            creds, "acme", permissions={"members": "read"}
+        )
+
+    assert token == "ghs_org"
+    body = json.loads(token_route.calls.last.request.content)
+    assert body == {"permissions": {"members": "read"}}
+
+
+def test_org_installation_token_for_missing_installation(
+    rsa_private_key: str,
+) -> None:
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/installation").mock(
+            return_value=httpx.Response(404, json={"message": "Not Found"})
+        )
+
+        with pytest.raises(AppNotInstalledOnOrgError) as excinfo:
+            org_installation_token_for(creds, "acme", permissions={"members": "read"})
+
+    assert "acme" in str(excinfo.value)
+
+
+def test_org_installation_token_for_other_errors_propagate(
+    rsa_private_key: str,
+) -> None:
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with respx.mock(base_url=API) as router:
+        router.get("/orgs/acme/installation").mock(
+            return_value=httpx.Response(500, json={"message": "boom"})
+        )
+
+        with pytest.raises(RequestFailed):
+            org_installation_token_for(creds, "acme", permissions={"members": "read"})
 
 
 # --- installation_token_for --------------------------------------------------

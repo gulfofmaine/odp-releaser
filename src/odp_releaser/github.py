@@ -76,6 +76,17 @@ class AppNotInstalledError(Exception):
         )
 
 
+class AppNotInstalledOnOrgError(Exception):
+    """The app has no installation on the target organization."""
+
+    def __init__(self, org: str, *, role: str = "reporter") -> None:
+        self.org = org
+        super().__init__(
+            f"The {role} app is not installed on the {org} organization. "
+            f"Install the {org} org's {role} app first."
+        )
+
+
 def _resolve_credentials(
     owner: str,
     *,
@@ -156,6 +167,28 @@ def resolve_reporter_credentials(owner: str) -> DispatchAppCredentials:
     )
 
 
+def is_team_member(org: str, team_slug: str, username: str, token: str) -> bool:
+    """Whether ``username`` is an active member of ``org``'s ``team_slug`` team.
+
+    Returns ``False`` when the user has no membership (404) or the membership
+    is still ``pending``. ``token`` needs organization members read access —
+    the default workflow ``GITHUB_TOKEN`` cannot read team membership. Other
+    request failures (bad credentials, missing scope, unknown team) propagate
+    so callers can distinguish "not a member" from "could not check".
+    """
+    with GitHub(TokenAuthStrategy(token)) as github:
+        try:
+            response = github.rest.teams.get_membership_for_user_in_org(
+                org, team_slug, username
+            )
+        except RequestFailed as exc:
+            if exc.response.status_code == 404:
+                return False
+            raise
+    state: str = response.json()["state"]
+    return state == "active"
+
+
 def pr_for_commit(repo: str, sha: str, token: str) -> PrMerge | None:
     """Return the first pull request associated with ``sha`` in ``repo``.
 
@@ -213,6 +246,44 @@ def installation_token_for(
                 "repositories": [repo],
                 "permissions": permissions,
             },
+        )
+    token: str = response.json()["token"]
+    return token
+
+
+def org_installation_token_for(
+    creds: DispatchAppCredentials,
+    org: str,
+    *,
+    permissions: dict[str, str],
+    role: str = "reporter",
+) -> str:
+    """Mint an installation access token from an app's organization installation.
+
+    Authenticates as the GitHub App, looks up its installation on the ``org``
+    organization (raising :class:`AppNotInstalledOnOrgError` on a 404), then
+    creates an installation access token restricted to ``permissions``.
+    Organization permissions (e.g. ``members: read``) are only honored when
+    the app itself has been granted them. Returns the token string. ``role``
+    only labels error messages and logs.
+    """
+    with GitHub(AppAuthStrategy(creds.app_id, creds.private_key)) as github:
+        try:
+            installation = github.rest.apps.get_org_installation(org)
+        except RequestFailed as exc:
+            if exc.response.status_code == 404:
+                raise AppNotInstalledOnOrgError(org, role=role) from exc
+            raise
+        installation_id = installation.json()["id"]
+
+        logger.debug(
+            "Minting org installation token for %s (installation %s)",
+            org,
+            installation_id,
+        )
+        response = github.rest.apps.create_installation_access_token(
+            installation_id,
+            data={"permissions": permissions},
         )
     token: str = response.json()["token"]
     return token

@@ -114,11 +114,24 @@ on:
       pr_title:
         description: Title for the bump pull request.
         value: ${{ jobs.bump.outputs.pr_title }}
+      reviewers:
+        description: >-
+          Comma-separated GitHub usernames requested as reviewers on the bump
+          pull request; empty when none are configured.
+        value: ${{ jobs.bump.outputs.reviewers }}
+      team_reviewers:
+        description: >-
+          Comma-separated GitHub team slugs requested as reviewers on the bump
+          pull request; empty when none are configured.
+        value: ${{ jobs.bump.outputs.team_reviewers }}
     secrets:
       ci_app_id:
         description: >-
           Optional App ID of this repo's GitHub App. When set, the commit/PR is
-          authored with an app token so it triggers this repo's own CI.
+          authored with an app token so it triggers this repo's own CI. Also
+          needed for `team_reviewers` in the image manifest config: when that
+          key is present, the app token is minted with organization "Members:
+          read" added, so the app must be granted that permission.
         required: false
       ci_app_private_key:
         description: Optional private key matching ci_app_id.
@@ -127,13 +140,17 @@ on:
         description: >-
           Optional JSON object mapping source owner -> {app_id, private_key}
           reporter app credentials, for deploy repos that receive dispatches
-          from multiple source orgs.
+          from multiple source orgs. Also used to check `allowed_actors` team
+          membership against source orgs (the app needs organization "Members:
+          read" there).
         required: false
       reporter_app_id:
         description: >-
           Optional App ID of the source org's reporter GitHub App. When set
           (with reporter_app_private_key), a successful bump is reported back to
-          the source repo as a GitHub deployment + status.
+          the source repo as a GitHub deployment + status, and `allowed_actors`
+          team membership is checked with it (the app needs organization
+          "Members: read" for that).
         required: false
       reporter_app_private_key:
         description: Optional private key matching reporter_app_id.
@@ -170,6 +187,8 @@ jobs:
       branch_name: ${{ steps.bump.outputs.branch_name }}
       commit_message: ${{ steps.bump.outputs.commit_message }}
       pr_title: ${{ steps.bump.outputs.pr_title }}
+      reviewers: ${{ steps.bump.outputs.reviewers }}
+      team_reviewers: ${{ steps.bump.outputs.team_reviewers }}
     steps:
       - name: Generate app token
         id: app-token
@@ -188,6 +207,35 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
           persist-credentials: true
+
+      - name: Check the image manifest for team reviewers
+        # Requesting a team review on the bump PR needs organization
+        # "Members: read" on the token. Detect `team_reviewers` in the
+        # manifest so the extra permission is only requested when the config
+        # actually asks for team reviews — apps without the permission keep
+        # working otherwise.
+        id: team-config
+        if: env.HAS_CI_APP == 'true'
+        env:
+          CONFIG_PATH: ${{ inputs.config_path }}
+        run: |
+          needed=false
+          if [ -f "$CONFIG_PATH" ] && grep -Eq '^[^#]*\bteam_reviewers[[:space:]]*:' "$CONFIG_PATH"; then
+            needed=true
+          fi
+          echo "needed=$needed" >> "$GITHUB_OUTPUT"
+
+      - name: Generate app token with members read
+        id: app-token-members
+        if:
+          env.HAS_CI_APP == 'true' && steps.team-config.outputs.needed == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ci_app_id }}
+          private-key: ${{ secrets.ci_app_private_key }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-members: read
 
       - name: Checkout odp-releaser
         # This reusable workflow's own repo, at the same commit GitHub
@@ -223,7 +271,12 @@ jobs:
           git_user_name: ${{ inputs.git_user_name }}
           git_user_email: ${{ inputs.git_user_email }}
           dry_run: ${{ inputs.dry_run }}
-          token: ${{ steps.app-token.outputs.token || github.token }}
+          token:
+            ${{ steps.app-token-members.outputs.token ||
+            steps.app-token.outputs.token || github.token }}
+          reporter_apps: ${{ secrets.reporter_apps }}
+          reporter_app_id: ${{ secrets.reporter_app_id }}
+          reporter_app_private_key: ${{ secrets.reporter_app_private_key }}
 
       - name: Bump commit URL
         # The bump_images action pushed the commit, so HEAD is the bump

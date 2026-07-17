@@ -73,9 +73,30 @@ inputs:
   token:
     description: >-
       Token used to push the bump commit or open the pull request. Pass an
-      app-minted token if the resulting commit/PR should trigger CI.
+      app-minted token if the resulting commit/PR should trigger CI. When the
+      image manifest configures `team_reviewers`, the token also needs
+      organization "Members: read" to request the team reviews — the
+      bump-images.yml reusable workflow mints one automatically.
     required: false
     default: ${{ github.token }}
+  reporter_apps:
+    description: >-
+      Optional JSON object mapping source owner -> {app_id, private_key}
+      reporter app credentials. Used (with organization "Members: read" granted
+      to the app) to check `allowed_actors` team membership against source orgs.
+    required: false
+    default: ""
+  reporter_app_id:
+    description: >-
+      Optional App ID of the source org's reporter GitHub App, used to check
+      `allowed_actors` team membership. Fallback for owners not in
+      reporter_apps.
+    required: false
+    default: ""
+  reporter_app_private_key:
+    description: Optional private key matching reporter_app_id.
+    required: false
+    default: ""
 
 outputs:
   image_name:
@@ -119,6 +140,16 @@ outputs:
   pr_body:
     description: Generated pull request body for the bump.
     value: ${{ steps.bump.outputs.pr_body }}
+  reviewers:
+    description:
+      Comma-separated GitHub usernames requested as reviewers on the bump pull
+      request; empty when none are configured.
+    value: ${{ steps.bump.outputs.reviewers }}
+  team_reviewers:
+    description:
+      Comma-separated GitHub team slugs requested as reviewers on the bump pull
+      request; empty when none are configured.
+    value: ${{ steps.bump.outputs.team_reviewers }}
 
 runs:
   using: composite
@@ -131,6 +162,11 @@ runs:
         CLIENT_PAYLOAD: ${{ inputs.client_payload }}
         VERBOSITY: ${{ inputs.verbosity }}
         DRY_RUN: ${{ inputs.dry_run }}
+        # Only used to check `allowed_actors` team membership against the
+        # source orgs; the CLI makes no other API calls here.
+        REPORTER_APPS: ${{ inputs.reporter_apps }}
+        REPORTER_APP_ID: ${{ inputs.reporter_app_id }}
+        REPORTER_APP_PRIVATE_KEY: ${{ inputs.reporter_app_private_key }}
       run: |
         if ! command -v odp-releaser >/dev/null; then
           echo "::error::odp-releaser CLI not found on the PATH; run the" \
@@ -189,3 +225,7 @@ runs:
         committer: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
         author: ${{ inputs.git_user_name }} <${{ inputs.git_user_email }}>
         delete-branch: true
+        # Empty values are treated as "not provided" upstream, so these are
+        # safe to pass unconditionally.
+        reviewers: ${{ steps.bump.outputs.reviewers }}
+        team-reviewers: ${{ steps.bump.outputs.team_reviewers }}

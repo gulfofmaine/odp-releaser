@@ -200,6 +200,9 @@ jobs:
       PR_BRANCH: ${{ needs.e2e-bump-pr.outputs.branch_name }}
       PR_IMAGE_NAME: ${{ needs.e2e-bump-pr.outputs.image_name }}
       PR_DIGEST: ${{ needs.e2e-bump-pr.outputs.digest }}
+      PR_REVIEWERS: ${{ needs.e2e-bump-pr.outputs.reviewers }}
+      PR_TEAM_REVIEWERS: ${{ needs.e2e-bump-pr.outputs.team_reviewers }}
+      COMMIT_REVIEWERS: ${{ needs.e2e-bump-commit.outputs.reviewers }}
       E2E_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     steps:
       - name: Assert notify and bump-images outputs
@@ -247,6 +250,9 @@ jobs:
             "Update image ghcr.io/gulfofmaine/odp-releaser-e2e-pr to $TAG"
           expect "pr-mode branch_name" "$PR_BRANCH" \
             "odp-releaser/bump-ghcr.io-gulfofmaine-odp-releaser-e2e-pr"
+          expect "pr-mode reviewers" "$PR_REVIEWERS" "odp-releaser-e2e-reviewer"
+          expect "pr-mode team_reviewers" "$PR_TEAM_REVIEWERS" ""
+          expect "commit-mode reviewers" "$COMMIT_REVIEWERS" ""
           exit "$fail"
 
   pass:

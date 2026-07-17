@@ -84,6 +84,29 @@ class FileManifest(BaseModel):
     ]
 
 
+class AllowedActors(BaseModel):
+    """Actors allowed to trigger a config's bumps. Both lists empty denies everyone."""
+
+    # Assignment form (not Annotated) so mypy's pydantic plugin sees the
+    # default_factory and treats these as optional constructor arguments.
+    users: list[str] = Field(
+        description=(
+            "GitHub usernames, compared case-insensitively against the "
+            "payload's source actor"
+        ),
+        default_factory=list,
+    )
+    teams: list[str] = Field(
+        description=(
+            "GitHub teams as org/team-slug entries. Membership is checked "
+            "with the source org's reporter app credentials (REPORTER_APPS / "
+            "REPORTER_APP_ID / REPORTER_APP_PRIVATE_KEY), so that app must "
+            "also be granted the organization Members: read permission"
+        ),
+        default_factory=list,
+    )
+
+
 class ImageConfig(BaseModel):
     """Configuration for an image, specifying which manifests to update and how."""
 
@@ -93,14 +116,37 @@ class ImageConfig(BaseModel):
             description="List of GitHub events for these manifests. Only these events will trigger updates. If `None`, all events trigger updates.",
         ),
     ] = None
+    allowed_source_repos: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Full repo names (owner/name) allowed to trigger this "
+                "config. Replaces the defaults-level list; unset inherits "
+                "it. A config whose resolved list rejects the payload's "
+                "repo is skipped"
+            ),
+        ),
+    ] = None
+    allowed_actors: Annotated[
+        AllowedActors | None,
+        Field(
+            description=(
+                "Users and teams allowed to trigger this config. Replaces "
+                "the defaults-level setting; unset inherits it. A config "
+                "whose resolved actors reject the payload's actor is "
+                "skipped. Use YAML merge keys (<<: *anchor) to share "
+                "allowlists between configs"
+            ),
+        ),
+    ] = None
     environment: Annotated[
         str | None,
         Field(
             description=(
                 "GitHub environment name reported back to the source repo "
                 "for this config's bumps (`report-deployment`). Overrides "
-                "the top-level environment; unset falls back to the deploy "
-                "repo's owner/name slug"
+                "the defaults-level environment; unset falls back to the "
+                "deploy repo's owner/name slug"
             ),
         ),
     ] = None
@@ -111,8 +157,8 @@ class ImageConfig(BaseModel):
                 "URL reported as the deployment's 'View deployment' link, "
                 "e.g. where this config's app runs. May reference "
                 "`{new_tag}`, `{git_sha}`, and `{digest}`. Overrides the "
-                "top-level environment_url; unset falls back to the bump "
-                "commit or pull request URL"
+                "defaults-level environment_url; unset falls back to the "
+                "bump commit or pull request URL"
             ),
         ),
     ] = None
@@ -125,6 +171,27 @@ class ImageConfig(BaseModel):
             ),
         ),
     ] = "commit"
+    reviewers: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "GitHub usernames requested as reviewers when this config's "
+                "bump opens a pull request. Replaces the defaults-level "
+                "list; unset inherits it, [] requests none"
+            ),
+        ),
+    ] = None
+    team_reviewers: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "GitHub team slugs (no org prefix) requested as reviewers "
+                "on the bump pull request. Replaces the defaults-level "
+                "list. The bump-images workflow detects this key and mints "
+                "its app token with organization Members: read"
+            ),
+        ),
+    ] = None
     # Assignment form (not Annotated) so mypy's pydantic plugin sees the
     # default_factory and treats these as optional constructor arguments.
     kustomize_manifests: list[KustomizeManifest] = Field(
@@ -141,14 +208,8 @@ class ImageConfig(BaseModel):
     )
 
 
-class ManifestConfig(BaseModel):
-    """Configuration for image manifests, mapping image names to their update configurations."""
-
-    images: Annotated[
-        dict[str, list[ImageConfig]],
-        Field(description="Mapping of image names to their configurations"),
-    ]
-    """Mapping of image names to manifests to update"""
+class ConfigDefaults(BaseModel):
+    """Default settings for every image config; a config's own value replaces the default."""
 
     allowed_source_repos: Annotated[
         list[str] | None,
@@ -156,6 +217,15 @@ class ManifestConfig(BaseModel):
             description=(
                 "Full repo names (owner/name) allowed to trigger bumps; "
                 "None disables the check"
+            ),
+        ),
+    ] = None
+
+    allowed_actors: Annotated[
+        AllowedActors | None,
+        Field(
+            description=(
+                "Users and teams allowed to trigger bumps; None disables the check"
             ),
         ),
     ] = None
@@ -184,6 +254,47 @@ class ManifestConfig(BaseModel):
         ),
     ] = None
 
+    reviewers: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "GitHub usernames requested as reviewers on bump pull requests"
+            ),
+        ),
+    ] = None
+
+    team_reviewers: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "GitHub team slugs (no org prefix) requested as reviewers "
+                "on bump pull requests. The bump-images workflow detects "
+                "this key and mints its app token with organization "
+                "Members: read (the ci app must be granted the permission)"
+            ),
+        ),
+    ] = None
+
+
+class ManifestConfig(BaseModel):
+    """Configuration for image manifests, mapping image names to their update configurations."""
+
+    # Assignment form (not Annotated) so mypy's pydantic plugin sees the
+    # default_factory and treats the field as an optional constructor argument.
+    defaults: ConfigDefaults = Field(
+        description=(
+            "Default settings applied to every image config; a config's "
+            "own value replaces the default"
+        ),
+        default_factory=ConfigDefaults,
+    )
+
+    images: Annotated[
+        dict[str, list[ImageConfig]],
+        Field(description="Mapping of image names to their configurations"),
+    ]
+    """Mapping of image names to manifests to update"""
+
     @classmethod
     def generate_yaml(cls) -> str:
         """Render the bundled :data:`EXAMPLE_MANIFEST` as commented YAML."""
@@ -191,13 +302,31 @@ class ManifestConfig(BaseModel):
 
 
 EXAMPLE_MANIFEST = ManifestConfig(
+    defaults=ConfigDefaults(
+        allowed_source_repos=[
+            "gulfofmaine/Neracoos-1-Buoy-App",
+            "ioos/buoy_retriever",
+        ],
+        allowed_actors=AllowedActors(
+            users=["abkfenris"],
+            teams=["gulfofmaine/deployers"],
+        ),
+        environment="staging",
+        environment_url="https://staging.neracoos.org",
+        reviewers=["abkfenris"],
+        team_reviewers=["deployers"],
+    ),
     images={
         "gmri/neracoos-mariners-dashboard": [
             ImageConfig(
                 events=["publish"],
+                allowed_source_repos=["gulfofmaine/Neracoos-1-Buoy-App"],
+                allowed_actors=AllowedActors(users=["abkfenris"]),
                 update_mode="pull_request",
                 environment="production",
                 environment_url="https://mariners.neracoos.org",
+                reviewers=["abkfenris"],
+                team_reviewers=["mariners"],
                 kustomize_manifests=[
                     KustomizeManifest(path=Path("../apps/mariners/kustomization.yaml")),
                 ],
@@ -245,8 +374,4 @@ EXAMPLE_MANIFEST = ManifestConfig(
             ),
         ],
     },
-    allowed_source_repos=[
-        "gulfofmaine/Neracoos-1-Buoy-App",
-        "ioos/buoy_retriever",
-    ],
 )
