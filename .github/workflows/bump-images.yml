@@ -130,8 +130,8 @@ on:
           Optional App ID of this repo's GitHub App. When set, the commit/PR is
           authored with an app token so it triggers this repo's own CI. Also
           needed for `team_reviewers` in the image manifest config: when that
-          key is present, the app token is minted with organization
-          "Members: read" added, so the app must be granted that permission.
+          key is present, the app token is minted with organization "Members:
+          read" added, so the app must be granted that permission.
         required: false
       ci_app_private_key:
         description: Optional private key matching ci_app_id.
@@ -141,8 +141,8 @@ on:
           Optional JSON object mapping source owner -> {app_id, private_key}
           reporter app credentials, for deploy repos that receive dispatches
           from multiple source orgs. Also used to check `allowed_actors` team
-          membership against source orgs (the app needs organization
-          "Members: read" there).
+          membership against source orgs (the app needs organization "Members:
+          read" there).
         required: false
       reporter_app_id:
         description: >-
@@ -228,8 +228,7 @@ jobs:
       - name: Generate app token with members read
         id: app-token-members
         if:
-          env.HAS_CI_APP == 'true' && steps.team-config.outputs.needed ==
-          'true'
+          env.HAS_CI_APP == 'true' && steps.team-config.outputs.needed == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.ci_app_id }}

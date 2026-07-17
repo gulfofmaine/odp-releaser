@@ -82,9 +82,8 @@ inputs:
   reporter_apps:
     description: >-
       Optional JSON object mapping source owner -> {app_id, private_key}
-      reporter app credentials. Used (with organization "Members: read"
-      granted to the app) to check `allowed_actors` team membership against
-      source orgs.
+      reporter app credentials. Used (with organization "Members: read" granted
+      to the app) to check `allowed_actors` team membership against source orgs.
     required: false
     default: ""
   reporter_app_id:
