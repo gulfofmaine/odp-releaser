@@ -60,7 +60,7 @@ docs = [
     "markdown-exec[ansi]>=1.12.3",
     "mkdocs-typer2[zensical]>=0.4.1",
     "mkdocstrings[python]>=1.0.6",
-    "zensical>=0.0.47",
+    "zensical>=0.0.50",
 ]
 
 
