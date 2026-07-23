@@ -93,11 +93,10 @@ repos:
         # title "Dump Github Actions events")
         exclude: .pre-commit-config.yaml|tests/event_data/|tests/test_github_context.py|tests/test_make_payload.py
 
-  - repo: https://github.com/abravalheri/validate-pyproject
-    rev: "4b2e70d08cb2ccd26d1fba73588de41c7a5d50b7" # frozen: v0.25
+  - repo: https://github.com/henryiii/validate-pyproject-schema-store
+    rev: "46fe0a3a97aa67cc4a63ad76d99f9fcdebfb5cb4" # frozen: 2026.07.17
     hooks:
       - id: validate-pyproject
-        additional_dependencies: ["validate-pyproject-schema-store[all]"]
 
   - repo: https://github.com/python-jsonschema/check-jsonschema
     rev: "6b63472e72e1a91ed8a2f6d483790dfb644fa1d3" # frozen: 0.37.4
@@ -116,3 +115,4 @@ repos:
 
 update:
   cooldown_days: 7
+  freeze: true
