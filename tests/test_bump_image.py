@@ -38,11 +38,17 @@ def _parse_github_output(text: str) -> dict[str, str]:
     return result
 
 
-def test_missmatched_sha_format_error():
+def test_missmatched_sha_format_error(capsys: pytest.CaptureFixture[str]) -> None:
+    """A bad placeholder is caught by the pre-flight, not mid-write.
+
+    This config's `set` value uses `{sha}` instead of `{git_sha}`, which used
+    to raise a bare `KeyError` out of `str.format` after earlier manifests had
+    already been written.
+    """
     client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
 
-    with pytest.raises(KeyError):
+    with pytest.raises(typer.Exit) as excinfo:
         bump_images(
             config_path=Path(__file__).parent
             / "manifests"
@@ -51,6 +57,11 @@ def test_missmatched_sha_format_error():
             client_payload=client_payload.model_dump_json(),
             dry_run=True,
         )
+
+    assert excinfo.value.exit_code == 1
+    stderr = capsys.readouterr().err
+    assert "{sha}" in stderr
+    assert "no manifests were written" in stderr
 
 
 def test_success_path_writes_github_output(
@@ -922,3 +933,84 @@ def test_bump_images_env_only_invocation(
     assert result.exit_code == 0, result.output
     outputs = _parse_github_output(output.read_text())
     assert outputs["changed"] == "true"
+
+
+def test_preflight_writes_nothing_when_a_later_manifest_is_broken(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The whole bump is refused, so no manifest is left half-applied.
+
+    Without the pre-flight, the first manifest was written and only then did
+    reading the second one raise, leaving the repo in a state no commit
+    accounted for.
+    """
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    first = tmp_path / "first.kustomization.yaml"
+    original = """\
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+  - name: gmri/neracoos-mariners-dashboard
+    newTag: "old-tag"
+"""
+    first.write_text(original)
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      kustomize_manifests:
+        - ./first.kustomization.yaml
+        - ./does-not-exist.kustomization.yaml
+"""
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        bump_images(
+            config_path=config_path,
+            client_payload=_payload_for().model_dump_json(),
+            dry_run=False,
+        )
+
+    assert excinfo.value.exit_code == 1
+    assert first.read_text() == original
+    assert "does-not-exist.kustomization.yaml" in capsys.readouterr().err
+
+
+def test_preflight_warnings_do_not_block_a_bump(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A config that works but looks odd still bumps; only `validate --strict` blocks."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    manifest = tmp_path / "kustomization.yaml"
+    manifest.write_text(
+        """\
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+  - name: gmri/neracoos-mariners-dashboard
+    newTag: "old-tag"
+    digest: "sha256:0000"
+"""
+    )
+    config_path = tmp_path / "image_manifest.yaml"
+    # reviewers with update_mode: commit, and a kustomize entry carrying both
+    # newTag and digest: two warnings, no errors.
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      reviewers: [alice]
+      kustomize_manifests:
+        - ./kustomization.yaml
+"""
+    )
+
+    _run_bump(config_path, _payload_for())
+
+    assert _parse_github_output(output.read_text())["changed"] == "true"

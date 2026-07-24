@@ -723,11 +723,14 @@ def _validate_template_value(
     ``str.format`` would attempt it, but nothing in ``value_format_kwargs()``
     supports it usefully, so it's flagged rather than silently misbehaving),
     and a stray ``{``/``}`` (``ValueError`` from ``Formatter().parse``
-    itself). When a real ``payload`` is available, the actual
-    ``value.format(**payload.value_format_kwargs())`` call is also attempted,
-    so this check is faithful to a real ``bump-images`` run rather than just
-    the placeholder names.
+    itself). When a real ``payload`` is available and none of those static
+    checks already flagged the value, the actual
+    ``value.format(**payload.value_format_kwargs())`` call is attempted too,
+    so the check is faithful to a real ``bump-images`` run rather than only to
+    the placeholder names -- but a value already reported above isn't reported
+    a second time for failing the very call that was predicted to fail.
     """
+    reported = False
     try:
         parsed = list(Formatter().parse(value))
     except ValueError as exc:
@@ -767,6 +770,9 @@ def _validate_template_value(
                 location=location.location,
                 line=location.line,
             )
+        else:
+            continue
+        reported = True
 
     if warn_if_no_placeholder and not field_names:
         diagnostics.warning(
@@ -776,7 +782,7 @@ def _validate_template_value(
             line=location.line,
         )
 
-    if payload is not None:
+    if payload is not None and not reported:
         try:
             value.format(**payload.value_format_kwargs())
         except (KeyError, ValueError) as exc:

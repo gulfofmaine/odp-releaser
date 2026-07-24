@@ -27,6 +27,7 @@ from odp_releaser.schemas.manifest_config import (
     ManifestConfig,
     resolve_setting,
 )
+from odp_releaser.validation.image_manifest import validate_image_configs
 
 DEFAULT_CONFIG_PATH = Path(".github/image_manifest.yaml")
 
@@ -186,6 +187,8 @@ def bump_images(
             typer.echo(message, err=True)
             raise typer.Exit(1)
 
+        _preflight(config_path, payload, authorized_configs, config.defaults)
+
         update_modes = {image_config.update_mode for image_config in authorized_configs}
         if len(update_modes) > 1:
             logger.warning(
@@ -287,6 +290,53 @@ def bump_images(
         }
     )
     write_step_summary(f"# {'\n'.join(commit_message)}")
+
+
+def _preflight(
+    config_path: Path,
+    payload: ClientPayload,
+    authorized_configs: list[ImageConfig],
+    defaults: ConfigDefaults,
+) -> None:
+    """Validate the configs about to be applied, before writing any manifest.
+
+    ``_apply_manifest`` writes each manifest as it goes, so a problem only the
+    third manifest has — a path that doesn't exist, a ``set`` selector that
+    doesn't resolve, a ``{sha}`` that should have been ``{git_sha}`` — used to
+    surface as a traceback *after* the first two were already written, leaving
+    a half-applied bump behind. Running the config validator over exactly the
+    configs this run selected turns that into one readable, complete list of
+    problems and a clean exit before anything changes on disk.
+
+    Warnings are logged rather than fatal: they describe configs that work but
+    probably don't do what their author meant, which is not a reason to fail a
+    release. ``odp-releaser validate image-manifest --strict`` is where those
+    are meant to block.
+    """
+    diagnostics = validate_image_configs(
+        config_path,
+        payload.image_name,
+        authorized_configs,
+        defaults,
+        payload=payload,
+    )
+    for warning in diagnostics.warnings:
+        logger.warning(warning.render())
+    if not diagnostics.failed():
+        return
+
+    for error in diagnostics.errors:
+        logger.error(error.render())
+        typer.echo(error.render(), err=True)
+    message = (
+        f"{len(diagnostics.errors)} problem(s) in {config_path} would make "
+        f"this bump of '{payload.image_name}' fail part-way through; no "
+        "manifests were written. Run `odp-releaser validate image-manifest "
+        f"{config_path}` to check the whole config."
+    )
+    logger.error(message)
+    typer.echo(message, err=True)
+    raise typer.Exit(1)
 
 
 def _resolve_config_setting[SettingT](
