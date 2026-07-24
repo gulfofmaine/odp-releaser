@@ -6,8 +6,7 @@ in :mod:`odp_releaser.validation.image_manifest` /
 :mod:`odp_releaser.validation.deploy_targets`), but never calls the GitHub
 API and never writes to a manifest -- these are read-only, offline checks
 meant to run in CI on a config repo or as a pre-commit hook, catching a
-mistake before it reaches a real release. This module is what the pre-commit
-hooks this project ships actually invoke.
+mistake before it reaches a real release.
 """
 
 from __future__ import annotations
@@ -69,22 +68,6 @@ DeployTargetsPaths = Annotated[
         ),
     ),
 ]
-
-
-@app.callback()
-def validate_main() -> None:
-    """Validate odp-releaser configs statically.
-
-    These commands check `image_manifest.yaml` and `deploy_targets.yaml`
-    files for schema errors, unknown keys, and the kinds of semantic
-    mistakes that would otherwise only surface minutes into a real release --
-    without ever calling the GitHub API or writing to a manifest. They are
-    exactly what this project's shipped pre-commit hooks run.
-    """
-    # Unlike `test`'s callback, the default log level is left untouched here:
-    # `open_for_editing` and yamlpath log at DEBUG through the shared project
-    # logger, so validation output is already extremely noisy at -vv/-vvv,
-    # and these commands need no extra default verbosity to be useful.
 
 
 _SEVERITY_COLORS = {
