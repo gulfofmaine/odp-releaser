@@ -16,6 +16,7 @@ nav = [
     { "Config" = [
         "config/deploy_targets.md",
         "config/image_manifest.md",
+        "validation.md",
     ]},
     { "API" = [
         "client_payload.md",

@@ -12,6 +12,10 @@ They set `owner` and `repo` pairs to send notification events to, and optionally
 
 It can be tested with `odp-releaser test notify`.
 
+It can also be statically checked -- schema, unknown keys, and semantic
+mistakes like a duplicate target -- with
+[`odp-releaser validate deploy-targets`](../validation.md).
+
 ## Example deploy targets
 
 ```bash

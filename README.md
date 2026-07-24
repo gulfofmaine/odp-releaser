@@ -58,6 +58,11 @@ The workflows are built from composite actions (`install`, `bump_images`, and
 committing, so custom steps (like syncing the image to another registry) can run
 before the commit.
 
+Both `image_manifest.yaml` and `deploy_targets.yaml` can be validated ahead of a
+release, offline and without touching GitHub: via the `odp-releaser validate`
+CLI command, a shipped pre-commit hook, or the published JSON Schemas for editor
+and `check-jsonschema` support.
+
 See the [docs](https://gulfofmaine.github.io/odp-releaser/) for the full
 workflow and action reference, the `client_payload`/manifest config schemas, and
 how to set up the GitHub Apps that authenticate the dispatch.

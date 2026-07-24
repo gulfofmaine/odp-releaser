@@ -8,6 +8,10 @@ The image manifest is usually stored at `.github/image_manifest.yaml` in the dep
 
 It can be tested with `odp-releaser test bump-images`.
 
+It can also be statically checked -- schema, unknown keys, and semantic
+mistakes like a bad `set` selector or template placeholder -- with
+[`odp-releaser validate image-manifest`](../validation.md).
+
 ## Example image manifest
 
 Example `image_manifest.yaml` with documentation can be generated via the CLI.
