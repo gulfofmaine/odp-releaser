@@ -9,47 +9,40 @@ from odp_releaser.validation.diagnostics import Diagnostic, Diagnostics, Severit
 FILE = Path("config/image_manifest.yaml")
 
 
+# Expectations are built from ``FILE`` rather than hardcoding a POSIX path:
+# a diagnostic renders the path with the platform's own separator (which is
+# what editors and pre-commit expect), so a literal would only pass on POSIX.
 @pytest.mark.parametrize(
-    ("line", "location", "expected"),
+    ("line", "location", "expected_suffix"),
     [
-        pytest.param(
-            12,
-            None,
-            "config/image_manifest.yaml:12: error: boom",
-            id="line-no-location",
-        ),
-        pytest.param(
-            None,
-            None,
-            "config/image_manifest.yaml: error: boom",
-            id="no-line-no-location",
-        ),
+        pytest.param(12, None, ":12: error: boom", id="line-no-location"),
+        pytest.param(None, None, ": error: boom", id="no-line-no-location"),
         pytest.param(
             12,
             'images."gmri/app"[0].set',
-            'config/image_manifest.yaml:12: error: boom (at images."gmri/app"[0].set)',
+            ':12: error: boom (at images."gmri/app"[0].set)',
             id="line-and-location",
         ),
         pytest.param(
             None,
             'images."gmri/app"[0].set',
-            'config/image_manifest.yaml: error: boom (at images."gmri/app"[0].set)',
+            ': error: boom (at images."gmri/app"[0].set)',
             id="location-no-line",
         ),
     ],
 )
 def test_diagnostic_render_shapes(
-    line: int | None, location: str | None, expected: str
+    line: int | None, location: str | None, expected_suffix: str
 ) -> None:
     diagnostic = Diagnostic(
         severity=Severity.error, message="boom", file=FILE, line=line, location=location
     )
-    assert diagnostic.render() == expected
+    assert diagnostic.render() == f"{FILE}{expected_suffix}"
 
 
 def test_diagnostic_render_uses_warning_severity() -> None:
     diagnostic = Diagnostic(severity=Severity.warning, message="hmm", file=FILE)
-    assert diagnostic.render() == "config/image_manifest.yaml: warning: hmm"
+    assert diagnostic.render() == f"{FILE}: warning: hmm"
 
 
 @pytest.mark.parametrize("strict", [False, True])
@@ -105,9 +98,9 @@ def test_render_orders_diagnostics_by_insertion_order() -> None:
     diagnostics.warning("third")
 
     assert diagnostics.render().splitlines() == [
-        "config/image_manifest.yaml: warning: first",
-        "config/image_manifest.yaml: error: second",
-        "config/image_manifest.yaml: warning: third",
+        f"{FILE}: warning: first",
+        f"{FILE}: error: second",
+        f"{FILE}: warning: third",
     ]
 
 

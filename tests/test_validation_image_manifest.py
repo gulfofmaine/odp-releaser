@@ -149,9 +149,10 @@ def test_key_error_fixture_names_the_bad_placeholder() -> None:
 def test_push_fixture_errors_on_missing_kustomize_file() -> None:
     diagnostics = validate_image_manifest(FIXTURES / "push" / "image_manifest.yaml")
     assert diagnostics.failed() is True
-    assert any(
-        "overlays/mariners/kustomization.yaml" in m for m in _messages(diagnostics)
-    )
+    # The message carries a resolved path, so match with the platform's own
+    # separator rather than a POSIX literal.
+    missing = Path("overlays") / "mariners" / "kustomization.yaml"
+    assert any(str(missing) in m for m in _messages(diagnostics))
 
 
 def test_push_fixture_clean_with_check_files_false() -> None:

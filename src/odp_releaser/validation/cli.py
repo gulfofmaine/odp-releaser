@@ -11,6 +11,7 @@ mistake before it reaches a real release.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -75,6 +76,51 @@ _SEVERITY_COLORS = {
     Severity.warning: typer.colors.YELLOW,
 }
 
+_CLEAN_MARK = "✓"
+
+
+def _encodable(text: str, encoding: str) -> str:
+    """``text`` with anything ``encoding`` can't represent replaced.
+
+    Windows consoles default to a legacy code page (cp1252) with no U+2713,
+    and click does not shield writes from that -- printing straight through
+    raises ``UnicodeEncodeError``, which would turn a *passing* pre-commit
+    hook into a traceback. Mangling one character in a diagnostic beats
+    losing the whole report.
+    """
+    try:
+        text.encode(encoding)
+    except UnicodeEncodeError:
+        return text.encode(encoding, errors="replace").decode(
+            encoding, errors="replace"
+        )
+    except LookupError:
+        # An encoding name Python doesn't know; ASCII is the safe floor.
+        return text.encode("ascii", errors="replace").decode("ascii")
+    return text
+
+
+def _stream_encoding(stream: object) -> str:
+    return getattr(stream, "encoding", None) or "utf-8"
+
+
+def _echo(text: str, *, err: bool = False, fg: str | None = None) -> None:
+    """Write one line, surviving a stream that can't encode every character."""
+    stream = sys.stderr if err else sys.stdout
+    typer.secho(_encodable(text, _stream_encoding(stream)), err=err, fg=fg)
+
+
+def _clean_mark() -> str:
+    """``✓``, or ``OK`` when stdout can't encode it (see :func:`_echo`).
+
+    Resolved per call rather than cached so it follows whichever stream is
+    actually in use, and kept separate from :func:`_encodable`'s replacement
+    so a clean run reads as ``OK <path>`` rather than ``? <path>``.
+    """
+    if _encodable(_CLEAN_MARK, _stream_encoding(sys.stdout)) != _CLEAN_MARK:
+        return "OK"
+    return _CLEAN_MARK
+
 
 def _render(diagnostics: Diagnostics, *, strict: bool) -> bool:
     """Print one file's diagnostics and report whether they should fail the run.
@@ -89,11 +135,9 @@ def _render(diagnostics: Diagnostics, *, strict: bool) -> bool:
     output stays plain text.
     """
     for diagnostic in diagnostics.diagnostics:
-        typer.secho(
-            diagnostic.render(), err=True, fg=_SEVERITY_COLORS[diagnostic.severity]
-        )
+        _echo(diagnostic.render(), err=True, fg=_SEVERITY_COLORS[diagnostic.severity])
     if not diagnostics.diagnostics:
-        typer.secho(f"✓ {diagnostics.file}", fg=typer.colors.GREEN)
+        _echo(f"{_clean_mark()} {diagnostics.file}", fg=typer.colors.GREEN)
     return diagnostics.failed(strict=strict)
 
 

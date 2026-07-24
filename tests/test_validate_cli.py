@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import io
+import sys
 from pathlib import Path
 
 import pytest
 import typer.testing
 
 from odp_releaser.main import app
-from odp_releaser.validation.cli import _SEVERITY_COLORS
+from odp_releaser.validation.cli import (
+    _SEVERITY_COLORS,
+    _clean_mark,
+    _echo,
+    _encodable,
+)
 from odp_releaser.validation.diagnostics import Severity
 
 MANIFESTS_DIR = Path(__file__).parent / "manifests"
@@ -141,3 +148,49 @@ def test_diagnostics_are_colored_by_severity(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert f"\x1b[{31}m" in result.stderr  # red error
     assert f"\x1b[{33}m" in result.stderr  # yellow warning
+
+
+# --- output encoding ------------------------------------------------------------
+
+
+def _stream(encoding: str) -> io.TextIOWrapper:
+    return io.TextIOWrapper(io.BytesIO(), encoding=encoding)
+
+
+def test_clean_mark_is_a_check_when_stdout_can_encode_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "stdout", _stream("utf-8"))
+    assert _clean_mark() == "✓"
+
+
+def test_clean_mark_degrades_to_ascii_on_a_legacy_code_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Windows consoles default to cp1252, which has no U+2713; printing it
+    # would otherwise raise UnicodeEncodeError and fail a passing hook.
+    monkeypatch.setattr(sys, "stdout", _stream("cp1252"))
+    assert _clean_mark() == "OK"
+
+
+@pytest.mark.parametrize(
+    ("text", "encoding", "expected"),
+    [
+        ("plain ✓", "utf-8", "plain ✓"),
+        ("plain ✓", "cp1252", "plain ?"),
+        # cp1252 has £ but not U+2713, so only the latter is mangled.
+        ("£5 ✓", "cp1252", "£5 ?"),
+        ("£5 ✓", "not-an-encoding", "?5 ?"),
+    ],
+)
+def test_encodable_replaces_only_what_the_stream_cannot_represent(
+    text: str, encoding: str, expected: str
+) -> None:
+    assert _encodable(text, encoding) == expected
+
+
+def test_echo_does_not_raise_on_a_legacy_code_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "stdout", _stream("cp1252"))
+    _echo("clean ✓")
