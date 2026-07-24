@@ -17,6 +17,7 @@ from odp_releaser.logger import logger
 from odp_releaser.make_payload import make_payload
 from odp_releaser.notify import notify, test_notify
 from odp_releaser.report_deployment import report_deployment
+from odp_releaser.validation.cli import app as validate_app
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -48,6 +49,7 @@ def install(ctx: typer.Context, shell: Shells) -> None:
 
 
 app.add_typer(generate_app, name="generate-config")
+app.add_typer(validate_app, name="validate")
 app.command()(notify)
 app.command()(bump_images)
 app.command(name="report-deployment")(report_deployment)
