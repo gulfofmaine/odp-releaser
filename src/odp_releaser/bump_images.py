@@ -25,6 +25,7 @@ from odp_releaser.schemas.manifest_config import (
     ConfigDefaults,
     ImageConfig,
     ManifestConfig,
+    resolve_setting,
 )
 
 DEFAULT_CONFIG_PATH = Path(".github/image_manifest.yaml")
@@ -288,17 +289,6 @@ def bump_images(
     write_step_summary(f"# {'\n'.join(commit_message)}")
 
 
-def _resolve_setting[SettingT](
-    config_value: SettingT | None, default: SettingT | None
-) -> SettingT | None:
-    """A config's own value, falling back to the defaults-level value.
-
-    Only an unset (``None``) config value inherits the default — an explicit
-    empty value (``[]``, ``""``) replaces it.
-    """
-    return config_value if config_value is not None else default
-
-
 def _resolve_config_setting[SettingT](
     authorized_configs: list[ImageConfig],
     default: SettingT | None,
@@ -315,7 +305,7 @@ def _resolve_config_setting[SettingT](
     values: list[SettingT] = [
         resolved
         for image_config in authorized_configs
-        if (resolved := _resolve_setting(getattr(image_config, attr), default))
+        if (resolved := resolve_setting(getattr(image_config, attr), default))
         is not None
     ]
     if not values:
@@ -343,7 +333,7 @@ def _config_authorizes(
     can still apply; ``team_checker`` caches GitHub team lookups across
     configs.
     """
-    allowed_repos = _resolve_setting(
+    allowed_repos = resolve_setting(
         image_config.allowed_source_repos, defaults.allowed_source_repos
     )
     if allowed_repos is not None and payload.repo not in allowed_repos:
@@ -353,7 +343,7 @@ def _config_authorizes(
         )
         return False
 
-    allowed_actors = _resolve_setting(
+    allowed_actors = resolve_setting(
         image_config.allowed_actors, defaults.allowed_actors
     )
     if allowed_actors is None:

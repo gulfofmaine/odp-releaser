@@ -276,6 +276,23 @@ class ConfigDefaults(BaseModel):
     ] = None
 
 
+def resolve_setting[SettingT](
+    config_value: SettingT | None, default: SettingT | None
+) -> SettingT | None:
+    """A config's own value, falling back to the defaults-level value.
+
+    Only an unset (``None``) config value inherits the default — an explicit
+    empty value (``[]``, ``""``) replaces it. Shared by ``bump_images`` (to
+    resolve the settings it actually applies) and the config validator (to
+    resolve the same settings when checking configs for agreement), so the
+    two can't drift
+    on what "resolved" means. It lives here rather than in ``bump_images``
+    so the validator can import it without importing ``bump_images`` itself
+    (which imports the validator in a later step).
+    """
+    return config_value if config_value is not None else default
+
+
 class ManifestConfig(BaseModel):
     """Configuration for image manifests, mapping image names to their update configurations."""
 
