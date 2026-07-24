@@ -1,0 +1,16 @@
+- id: odp-releaser-validate-image-manifest
+  name: Validate odp-releaser image manifest
+  description: >-
+    Validate an image_manifest.yaml config against odp-releaser's schema and
+    semantic checks, without ever calling the GitHub API.
+  entry: odp-releaser validate image-manifest
+  language: python
+  files: ^\.github/image_manifest\.ya?ml$
+- id: odp-releaser-validate-deploy-targets
+  name: Validate odp-releaser deploy targets
+  description: >-
+    Validate a deploy_targets.yaml config against odp-releaser's schema and
+    semantic checks, without ever calling the GitHub API.
+  entry: odp-releaser validate deploy-targets
+  language: python
+  files: ^\.github/deploy_targets\.ya?ml$

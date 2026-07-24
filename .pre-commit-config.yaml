@@ -42,8 +42,13 @@ repos:
         types_or: [yaml, markdown, html, css, scss, javascript, json]
         args: [--prose-wrap=always]
         # mkdocstrings/mkdocs-typer2 `:::` directives rely on indented
-        # continuation lines that prettier folds into a single paragraph
-        exclude: ^docs/.*\.md$
+        # continuation lines that prettier folds into a single paragraph;
+        # the generated schemas/*.schema.json files are committed verbatim
+        # from `json.dumps(..., indent=2)` (see test_json_schema.py) so they
+        # can't drift from a plain regeneration -- prettier collapses short
+        # scalar arrays (e.g. `"required": [...]`) onto one line, which
+        # `json.dumps` doesn't do, so those files are excluded here instead.
+        exclude: ^docs/.*\.md$|^schemas/.*\.schema\.json$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "2700fd5671c633760d912769c041bfcde2b9a01b" # frozen: v0.15.22
@@ -64,9 +69,11 @@ repos:
           - cryptography
           - githubkit
           - inline-snapshot
+          - jsonschema
           - pydantic
           - respx
           - typer
+          - types-jsonschema
           - rich
           - ruamel.yaml
 
@@ -92,6 +99,22 @@ repos:
         # GitHub event payloads whose text can't be edited (e.g. the real PR
         # title "Dump Github Actions events")
         exclude: .pre-commit-config.yaml|tests/event_data/|tests/test_github_context.py|tests/test_make_payload.py
+      - id: odp-releaser-validate-image-manifest
+        name: Validate odp-releaser image manifest
+        # Dogfoods this project's own hook (see .pre-commit-hooks.yaml)
+        # against the known-good e2e fixture only -- tests/manifests/ holds
+        # deliberately invalid configs used by the unit tests, so files: is
+        # anchored to this one path rather than reusing a broad pattern.
+        entry: uv run odp-releaser validate image-manifest
+        language: system
+        files: ^tests/e2e/image_manifest\.yaml$
+        pass_filenames: true
+      - id: odp-releaser-validate-deploy-targets
+        name: Validate odp-releaser deploy targets
+        entry: uv run odp-releaser validate deploy-targets
+        language: system
+        files: ^tests/e2e/deploy_targets\.yaml$
+        pass_filenames: true
 
   - repo: https://github.com/henryiii/validate-pyproject-schema-store
     rev: "46fe0a3a97aa67cc4a63ad76d99f9fcdebfb5cb4" # frozen: 2026.07.17
