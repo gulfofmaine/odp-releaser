@@ -51,6 +51,7 @@ from odp_releaser.schemas.manifest_config import (
     resolve_setting,
 )
 from odp_releaser.validation.diagnostics import Diagnostics
+from odp_releaser.validation.ruamel_lines import line_for_index, line_for_key
 from odp_releaser.validation.unknown_keys import report_unknown_keys
 
 if TYPE_CHECKING:
@@ -161,7 +162,7 @@ def validate_image_manifest(
 
     defaults_location = ConfigLocation(
         "defaults",
-        line=_line_for_key(data, "defaults") if isinstance(data, Mapping) else None,
+        line=line_for_key(data, "defaults") if isinstance(data, Mapping) else None,
     )
     _check_repo_and_actor_shape(
         config.defaults.allowed_source_repos,
@@ -182,7 +183,7 @@ def validate_image_manifest(
         )
 
     for image_name, image_configs in config.images.items():
-        image_line = _line_for_key(images_data, image_name)
+        image_line = line_for_key(images_data, image_name)
         _check_image_name(image_name, diagnostics, line=image_line)
 
         if payload is not None and image_name != payload.image_name:
@@ -202,7 +203,7 @@ def validate_image_manifest(
             continue
 
         first_index = matching[0][0]
-        item_line = _line_for_index(configs_data, first_index)
+        item_line = line_for_index(configs_data, first_index)
         location = ConfigLocation(
             f'images."{image_name}"',
             line=item_line if item_line is not None else image_line,
@@ -282,35 +283,6 @@ def _yaml_error_line(exc: YAMLError) -> int | None:
     mark = getattr(exc, "problem_mark", None)
     line = getattr(mark, "line", None)
     return line + 1 if isinstance(line, int) else None
-
-
-def _line_for_key(data: object, key: object) -> int | None:
-    """1-based source line of ``key`` in a round-trip-loaded mapping, if known.
-
-    Same ``lc.data`` lookup :func:`odp_releaser.validation.unknown_keys` uses
-    for the same reason: a plain ``dict`` (or a non-round-trip load) has no
-    ``lc`` attribute, so this degrades to ``None`` instead of raising.
-    """
-    if not isinstance(data, Mapping):
-        return None
-    line_col = getattr(data, "lc", None)
-    lc_data = getattr(line_col, "data", None)
-    if not isinstance(lc_data, dict) or key not in lc_data:
-        return None
-    key_line: int = lc_data[key][0]
-    return key_line + 1
-
-
-def _line_for_index(data: object, index: int) -> int | None:
-    """1-based source line of ``data[index]`` in a round-trip-loaded sequence."""
-    if not isinstance(data, list):
-        return None
-    line_col = getattr(data, "lc", None)
-    lc_data = getattr(line_col, "data", None)
-    if not isinstance(lc_data, dict) or index not in lc_data:
-        return None
-    item_line: int = lc_data[index][0]
-    return item_line + 1
 
 
 def _check_image_name(

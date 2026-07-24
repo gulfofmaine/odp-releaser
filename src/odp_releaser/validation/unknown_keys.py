@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
+from odp_releaser.validation.ruamel_lines import line_for_key
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -69,7 +71,7 @@ def report_unknown_keys(
         if key not in fields:
             diagnostics.error(
                 _unknown_key_message(key, fields),
-                line=_line_for_key(data, key),
+                line=line_for_key(data, key),
                 location=location or None,
             )
 
@@ -85,26 +87,6 @@ def _unknown_key_message(key: object, fields: Mapping[str, FieldInfo]) -> str:
     if not valid_keys:
         return f"Unknown key {key!r}"
     return f"Unknown key {key!r}; valid keys are: {valid_keys}"
-
-
-def _line_for_key(data: Mapping[object, object], key: object) -> int | None:
-    """Resolve a mapping key's 1-based source line from ruamel round-trip line info.
-
-    A round-trip-loaded ``CommentedMap`` exposes ``data.lc.data[key]`` as a
-    ``(key_line, key_col, value_line, value_col)`` tuple, 0-based. A plain
-    ``dict`` (or a map loaded by a non-round-trip loader) has no ``lc``
-    attribute at all, so the lookup is guarded with ``getattr``/membership
-    checks rather than assumed to be present, and yields ``None`` instead of
-    raising.
-    """
-    line_col = getattr(data, "lc", None)
-    if line_col is None:
-        return None
-    lc_data = getattr(line_col, "data", None)
-    if not isinstance(lc_data, dict) or key not in lc_data:
-        return None
-    key_line: int = lc_data[key][0]
-    return key_line + 1
 
 
 def _recurse_into_field(
