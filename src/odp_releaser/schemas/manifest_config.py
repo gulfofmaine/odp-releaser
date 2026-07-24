@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from odp_releaser.schemas.example_yaml import example_yaml
+
+if TYPE_CHECKING:
+    from pydantic import GetJsonSchemaHandler
+    from pydantic.json_schema import JsonSchemaValue
+    from pydantic_core import CoreSchema
 
 SET_DESCRIPTION = (
     "Mapping of yamlpath expressions to templated values. "
@@ -44,6 +49,34 @@ class KustomizeManifest(BaseModel):
         if isinstance(value, (str, Path)):
             return {"path": value}
         return value
+
+    @classmethod
+    # pylint sees BaseModel's hook as taking no arguments, so an override with
+    # pydantic's documented signature reads as arguments-differ.
+    def __get_pydantic_json_schema__(  # pylint: disable=arguments-differ
+        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        """Also accept the bare-path shorthand ``coerce_path_string`` allows.
+
+        ``model_json_schema()`` only sees the mapping form, so the generated
+        schema in ``schemas/`` (used for editor completion and
+        ``check-jsonschema``) would flag the documented
+        ``- ./kustomization.yaml`` shorthand as an error. Declaring the union
+        here keeps the published schema honest about what the model really
+        validates.
+        """
+        return {
+            "anyOf": [
+                handler(core_schema),
+                {
+                    "type": "string",
+                    "description": (
+                        "Relative path to the Kustomize manifest, shorthand "
+                        "for a mapping with only `path` set"
+                    ),
+                },
+            ]
+        }
 
 
 class HelmManifest(BaseModel):
