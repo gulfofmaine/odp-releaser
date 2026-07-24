@@ -61,6 +61,7 @@ def validate_deploy_targets(targets_path: Path) -> Diagnostics:
     """
     diagnostics = Diagnostics(targets_path)
 
+    # pylint: disable=duplicate-code
     try:
         targets = load_targets(targets_path)
     except (
@@ -70,6 +71,7 @@ def validate_deploy_targets(targets_path: Path) -> Diagnostics:
     ) as exc:
         diagnostics.error(str(exc))
         return diagnostics
+    # pylint: enable=duplicate-code
 
     raw_items = _load_raw_items(targets_path)
     duplicates = _duplicate_indices(targets)

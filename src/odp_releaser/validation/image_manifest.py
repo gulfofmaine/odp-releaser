@@ -31,6 +31,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from string import Formatter
+from types import NoneType
 from typing import TYPE_CHECKING, Any, get_args
 
 from pydantic import ValidationError
@@ -803,8 +804,9 @@ def _known_events() -> tuple[str, ...]:
     :class:`~odp_releaser.schemas.manifest_config.ImageConfig` if an event is
     ever added or renamed there.
     """
-    annotation = ImageConfig.model_fields["events"].annotation
-    list_type = next(arg for arg in get_args(annotation) if arg is not type(None))
+    # pylint doesn't model pydantic's model_fields as a mapping.
+    annotation = ImageConfig.model_fields["events"].annotation  # pylint: disable=unsubscriptable-object
+    list_type = next(arg for arg in get_args(annotation) if arg is not NoneType)
     (literal_type,) = get_args(list_type)
     return get_args(literal_type)
 
