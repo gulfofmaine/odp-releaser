@@ -11,6 +11,7 @@ which callers merge (``extend``) and then interrogate (``failed``) and print
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -47,8 +48,15 @@ class Diagnostic:
         text position — is appended parenthetically to the message rather
         than folded into the ``path:line`` prefix, since editors and
         pre-commit's own output parse that prefix positionally.
+
+        The result is guaranteed to be exactly one line: some messages are
+        inherently multi-line (e.g. a ruamel ``YAMLError``'s ``str()`` spans
+        several lines of context), and without collapsing them, only the
+        first line would carry the ``path:line:`` attribution while the rest
+        became unparsable noise. Any run of whitespace containing a newline
+        collapses to a single space, so the full message survives on one line.
         """
-        message = self.message
+        message = re.sub(r"\s*\n\s*", " ", self.message).strip()
         if self.location is not None:
             message = f"{message} (at {self.location})"
         if self.line is not None:

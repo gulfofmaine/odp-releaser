@@ -45,6 +45,32 @@ def test_diagnostic_render_uses_warning_severity() -> None:
     assert diagnostic.render() == f"{FILE}: warning: hmm"
 
 
+# A multi-line message (e.g. a ruamel ``YAMLError``'s ``str()``) must still
+# render as one line, or only the first line ends up attributed to
+# ``path:line:`` and the rest becomes unparsable noise for pre-commit/editors.
+def test_diagnostic_render_collapses_multiline_message() -> None:
+    message = (
+        'Could not parse "config/image_manifest.yaml" as YAML: while parsing a flow mapping\n'
+        '  in "<unicode string>", line 6, column 16:\n'
+        "            set: {bad\n"
+        "                 ^ (line: 6)"
+    )
+    diagnostic = Diagnostic(severity=Severity.error, message=message, file=FILE, line=7)
+    rendered = diagnostic.render()
+
+    assert len(rendered.splitlines()) == 1
+    assert "^ (line: 6)" in rendered
+    assert rendered.startswith(f"{FILE}:7: error: Could not parse")
+
+
+def test_diagnostic_render_collapses_multiline_message_with_blank_lines() -> None:
+    # Blank lines and leading indentation shouldn't leave behind double spaces.
+    diagnostic = Diagnostic(
+        severity=Severity.error, message="first\n\n   second", file=FILE
+    )
+    assert diagnostic.render() == f"{FILE}: error: first second"
+
+
 @pytest.mark.parametrize("strict", [False, True])
 def test_failed_is_false_when_clean(strict: bool) -> None:
     diagnostics = Diagnostics(FILE)
@@ -102,6 +128,22 @@ def test_render_orders_diagnostics_by_insertion_order() -> None:
         f"{FILE}: error: second",
         f"{FILE}: warning: third",
     ]
+
+
+# The property that actually matters for pre-commit/editor output: N
+# diagnostics must render as exactly N lines, even when individual messages
+# are multi-line, so each line stays attributable to the diagnostic it came from.
+def test_diagnostics_render_is_one_line_per_diagnostic_even_with_multiline_messages() -> (
+    None
+):
+    diagnostics = Diagnostics(FILE)
+    diagnostics.warning("first")
+    diagnostics.error("second\nwith a continuation line")
+    diagnostics.warning("third\n  indented continuation\nand more")
+
+    rendered = diagnostics.render()
+
+    assert len(rendered.splitlines()) == 3
 
 
 def test_extend_merges_diagnostics_from_another_collector() -> None:
