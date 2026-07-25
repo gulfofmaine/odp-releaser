@@ -156,6 +156,124 @@ images:
     return config_path
 
 
+def _write_helm_dagster_case(tmp_path: Path) -> Path:
+    """Clean helm case: a dagster deployment whose image.tag really gets bumped."""
+    (tmp_path / "values.yaml").write_text(
+        """\
+deployments:
+  - name: app
+    image:
+      repository: gmri/app
+      tag: "old"
+""",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/app:
+    - events: [push]
+      helm_charts:
+        - path: ./values.yaml
+          dagster_user_code: true
+""",
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _write_helm_no_matching_deployment_case(tmp_path: Path) -> Path:
+    """Agreement case with no error either side: helm only *warns* when nothing matches.
+
+    ``update_helm_values_with_payload`` logs a warning and leaves the file
+    alone, so the validator must not call this an error -- but the run also
+    changes nothing, which is why this case expects ``changed`` to be false.
+    """
+    (tmp_path / "values.yaml").write_text(
+        """\
+deployments:
+  - name: other
+    image:
+      repository: gmri/somebody-else
+      tag: "old"
+""",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/app:
+    - events: [push]
+      helm_charts:
+        - path: ./values.yaml
+          dagster_user_code: true
+""",
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _write_helm_bad_selector_case(tmp_path: Path) -> Path:
+    """Engine failure mode in the helm engine: an unresolvable ``set`` selector."""
+    (tmp_path / "values.yaml").write_text('image:\n  tag: "old"\n', encoding="utf-8")
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/app:
+    - events: [push]
+      helm_charts:
+        - path: ./values.yaml
+          set:
+            '/nowhere/tag': '{new_tag}'
+""",
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _write_file_json_case(tmp_path: Path) -> Path:
+    """Clean file-manifest case, exercising the JSON re-serialisation branch."""
+    (tmp_path / "deployment.json").write_text(
+        '{\n  "spec": {\n    "image": "gmri/app:old"\n  }\n}\n', encoding="utf-8"
+    )
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/app:
+    - events: [push]
+      file_manifests:
+        - path: ./deployment.json
+          set:
+            '/spec/image': 'gmri/app:{new_tag}'
+""",
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _write_file_bad_placeholder_case(tmp_path: Path) -> Path:
+    """Engine failure mode in the file engine: an unknown ``{placeholder}``."""
+    (tmp_path / "values.yaml").write_text('image:\n  tag: "old"\n', encoding="utf-8")
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/app:
+    - events: [push]
+      file_manifests:
+        - path: ./values.yaml
+          set:
+            '/image/tag': '{sha}'
+""",
+        encoding="utf-8",
+    )
+    return config_path
+
+
 @dataclass(frozen=True)
 class Case:
     """One corpus entry: a config, the image+event to check it against, and the verdict."""
@@ -166,6 +284,10 @@ class Case:
     expect_error: bool
     build: Callable[[Path], Path]
     repo: str | None = None
+    # Whether a clean run must report changed=true. False only where the
+    # runtime legitimately applies nothing (helm logs a warning and leaves the
+    # file alone when no deployment matches), so "clean" can't imply "applied".
+    expect_changed: bool = True
 
 
 CASES = [
@@ -253,6 +375,44 @@ CASES = [
         expect_error=True,
         build=_write_pin_tag_missing_new_tag_case,
     ),
+    # --- helm and file engines, so this module covers every engine bump-images
+    # can call, not just kustomize. ---
+    Case(
+        "synthetic-helm-dagster-clean",
+        "gmri/app",
+        EventType.push,
+        expect_error=False,
+        build=_write_helm_dagster_case,
+    ),
+    Case(
+        "synthetic-helm-no-matching-deployment",
+        "gmri/app",
+        EventType.push,
+        expect_error=False,
+        build=_write_helm_no_matching_deployment_case,
+        expect_changed=False,
+    ),
+    Case(
+        "synthetic-helm-selector-does-not-resolve",
+        "gmri/app",
+        EventType.push,
+        expect_error=True,
+        build=_write_helm_bad_selector_case,
+    ),
+    Case(
+        "synthetic-file-json-clean",
+        "gmri/app",
+        EventType.push,
+        expect_error=False,
+        build=_write_file_json_case,
+    ),
+    Case(
+        "synthetic-file-bad-placeholder",
+        "gmri/app",
+        EventType.push,
+        expect_error=True,
+        build=_write_file_bad_placeholder_case,
+    ),
 ]
 
 
@@ -303,9 +463,11 @@ def test_validator_verdict_matches_runtime_behavior(
         # can carry non-ASCII (the release fixture's title has an em dash), so
         # never read it with the platform's locale encoding.
         outputs = _parse_github_output(output_path.read_text(encoding="utf-8"))
-        assert outputs["changed"] == "true", (
+        expected_changed = "true" if case.expect_changed else "false"
+        assert outputs["changed"] == expected_changed, (
             f"{case.case_id}: validator was clean but bump_images reported "
-            "no change -- the engines may not have run to completion"
+            f"changed={outputs['changed']!r}, expected {expected_changed!r} -- "
+            "the engines may not have run to completion"
         )
 
 
