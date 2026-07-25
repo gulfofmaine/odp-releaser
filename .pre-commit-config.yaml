@@ -115,6 +115,28 @@ repos:
         language: system
         files: ^tests/e2e/deploy_targets\.yaml$
         pass_filenames: true
+      - id: regenerate-json-schemas
+        name: Regenerate JSON Schemas from pydantic models
+        # schemas/*.schema.json are generated from the pydantic config models
+        # (see src/odp_releaser/schemas/json_schema.py); test_json_schema.py
+        # asserts the committed files are current, but nothing stopped a
+        # commit that changed a model without regenerating them. This
+        # regenerates both files in place and then diffs, so -- like
+        # ruff-format/blacken-docs -- a stale schema fails this commit but
+        # leaves the fix already written to disk; re-staging and
+        # re-committing is all that's needed. files: intentionally covers the
+        # model modules and the generator itself, not just the schema files,
+        # since the point is to catch model drift at the source rather than
+        # only re-trigger on edits to the schema files themselves.
+        entry: >-
+          bash -c 'set -e; uv run odp-releaser generate-config schema
+          image-manifest > schemas/image_manifest.schema.json; uv run
+          odp-releaser generate-config schema deploy-targets >
+          schemas/deploy_targets.schema.json; git diff --exit-code --
+          schemas/image_manifest.schema.json schemas/deploy_targets.schema.json'
+        language: system
+        files: ^(src/odp_releaser/schemas/(manifest_config|dispatch|json_schema)\.py|schemas/(image_manifest|deploy_targets)\.schema\.json)$
+        pass_filenames: false
 
   - repo: https://github.com/henryiii/validate-pyproject-schema-store
     rev: "46fe0a3a97aa67cc4a63ad76d99f9fcdebfb5cb4" # frozen: 2026.07.17
