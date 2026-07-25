@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, model_validator
 from odp_releaser.schemas.example_yaml import example_yaml
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from pydantic import GetJsonSchemaHandler
     from pydantic.json_schema import JsonSchemaValue
     from pydantic_core import CoreSchema
@@ -324,6 +326,31 @@ def resolve_setting[SettingT](
     (which imports the validator in a later step).
     """
     return config_value if config_value is not None else default
+
+
+def config_matches_event(image_config: ImageConfig, event: str) -> bool:
+    """Whether ``image_config`` applies to ``event``.
+
+    An ``events: None`` config matches every event; otherwise ``event`` must
+    be explicitly listed. This is the exact filter ``bump_images`` applies to
+    an image's configs, before resolving any setting or applying any
+    manifest, so the validator must use this same predicate rather than
+    re-spell it -- otherwise a future change to the event-matching rule could
+    land on one side only, leaving the validator checking a different set of
+    configs than the ones a real run would apply.
+    """
+    return image_config.events is None or event in image_config.events
+
+
+def configs_for_event(
+    image_configs: Iterable[ImageConfig], event: str
+) -> list[ImageConfig]:
+    """The configs in ``image_configs`` that match ``event``, in config order."""
+    return [
+        image_config
+        for image_config in image_configs
+        if config_matches_event(image_config, event)
+    ]
 
 
 class ManifestConfig(BaseModel):

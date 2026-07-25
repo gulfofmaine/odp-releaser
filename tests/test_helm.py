@@ -4,7 +4,11 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from odp_releaser.manifests.helm import update_helm_values_with_payload
+from odp_releaser.manifests.helm import (
+    dagster_deployment_path,
+    dagster_tag_path,
+    update_helm_values_with_payload,
+)
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import HelmManifest
 
@@ -33,6 +37,28 @@ def _payload(image_name: str = IMAGE_NAME) -> ClientPayload:
             },
         }
     )
+
+
+# --- Selector builders (pinned exact strings) --------------------------------
+
+
+def test_dagster_deployment_path_exact_string() -> None:
+    assert (
+        dagster_deployment_path("ghcr.io/owner/app")
+        == '/deployments[image.repository="ghcr.io/owner/app"]'
+    )
+
+
+def test_dagster_tag_path_exact_string() -> None:
+    assert (
+        dagster_tag_path("ghcr.io/owner/app")
+        == '/deployments[image.repository="ghcr.io/owner/app"]/image/tag'
+    )
+
+
+def test_dagster_tag_path_is_built_from_deployment_path() -> None:
+    name = "ghcr.io/owner/app"
+    assert dagster_tag_path(name) == f"{dagster_deployment_path(name)}/image/tag"
 
 
 def test_dagster_user_code_updates_matching_tag_and_preserves_rest() -> None:

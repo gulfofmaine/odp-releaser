@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from yamlpath import Processor
 from yamlpath.common import Parsers
 from yamlpath.enums import YAMLValueFormats
@@ -12,6 +14,36 @@ yamlpath_logger = YamlPathLoggerAdapter(logger)
 
 class ManifestLoadError(Exception):
     """Raised when a manifest's YAML cannot be loaded."""
+
+
+def resolve_manifest_path(config_path: Path, manifest_path: Path) -> Path:
+    """Resolve a manifest's ``path`` field against its config file's directory.
+
+    Paths inside an image manifest config are documented (on ``bump-images
+    --config-path``) as relative to the config file's own parent directory,
+    not the process's current working directory. ``bump_images`` (which
+    reads and writes the file) and the config validator (which checks it
+    ahead of time) both resolve every manifest path through this exact
+    function -- if the two ever resolved a path differently, the validator
+    would be checking a different file than the one ``bump_images`` actually
+    reads and writes, silently making its checks meaningless.
+    """
+    return (config_path.parent / manifest_path).resolve()
+
+
+def display_manifest_path(manifest_path: Path) -> Path:
+    """A resolved manifest path, shown relative to the cwd when possible.
+
+    Keeps commit messages and logs readable (and stable across CI runners
+    with different absolute checkout paths) by referring to manifests
+    relative to the working directory. Falls back to the resolved path
+    itself when it isn't under the cwd (e.g. a manifest path that escapes
+    the repository).
+    """
+    try:
+        return manifest_path.relative_to(Path.cwd())
+    except ValueError:
+        return manifest_path
 
 
 def open_for_editing(manifest_text: str) -> Processor:

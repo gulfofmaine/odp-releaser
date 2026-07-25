@@ -16,6 +16,8 @@ from odp_releaser.schemas.manifest_config import (
     ImageConfig,
     KustomizeManifest,
     ManifestConfig,
+    config_matches_event,
+    configs_for_event,
 )
 
 MANIFESTS_DIR = Path(__file__).parent / "manifests"
@@ -139,3 +141,31 @@ def _image_with_kustomize(manifest: KustomizeManifest) -> ImageConfig:
 def test_file_manifest_requires_set() -> None:
     with pytest.raises(ValueError, match="set"):
         FileManifest.model_validate({"path": "./deployment.json"})
+
+
+# --- config_matches_event / configs_for_event --------------------------------
+
+
+def test_config_matches_event_none_matches_every_event() -> None:
+    config = ImageConfig(events=None)
+
+    assert config_matches_event(config, "push")
+    assert config_matches_event(config, "release")
+
+
+def test_config_matches_event_only_matches_listed_events() -> None:
+    config = ImageConfig(events=["push", "publish"])
+
+    assert config_matches_event(config, "push")
+    assert config_matches_event(config, "publish")
+    assert not config_matches_event(config, "release")
+
+
+def test_configs_for_event_filters_and_preserves_config_order() -> None:
+    matches_all = ImageConfig(events=None)
+    push_only = ImageConfig(events=["push"])
+    release_only = ImageConfig(events=["release"])
+
+    result = configs_for_event([push_only, matches_all, release_only], "push")
+
+    assert result == [push_only, matches_all]

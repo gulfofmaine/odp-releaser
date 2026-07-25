@@ -18,6 +18,7 @@ from odp_releaser.github_output import write_github_output, write_step_summary
 from odp_releaser.logger import logger
 from odp_releaser.manifests.file import update_file_with_payload
 from odp_releaser.manifests.helm import update_helm_values_with_payload
+from odp_releaser.manifests.helpers import display_manifest_path, resolve_manifest_path
 from odp_releaser.manifests.kustomize import update_kustomize_with_payload
 from odp_releaser.report_metadata import ReportMetadata, embed_metadata
 from odp_releaser.schemas.client_payload import ClientPayload
@@ -25,6 +26,7 @@ from odp_releaser.schemas.manifest_config import (
     ConfigDefaults,
     ImageConfig,
     ManifestConfig,
+    configs_for_event,
     resolve_setting,
 )
 from odp_releaser.validation.image_manifest import validate_image_configs
@@ -52,13 +54,8 @@ def _apply_manifest[ManifestT: _HasPath](
     when the contents actually changed, so unchanged manifests don't show up
     in the audit trail.
     """
-    manifest_path = (config_path.parent / manifest.path).resolve()
-    try:
-        # Keep commit messages and logs readable (and stable across runners)
-        # by referring to manifests relative to the working directory.
-        display_path = manifest_path.relative_to(Path.cwd())
-    except ValueError:
-        display_path = manifest_path
+    manifest_path = resolve_manifest_path(config_path, manifest.path)
+    display_path = display_manifest_path(manifest_path)
     original_manifest = manifest_path.read_text()
     manifest_messages: list[str] = []
     updated_manifest = update_fn(
@@ -162,12 +159,9 @@ def bump_images(
         logger.debug("Configs for the image:")
         logger.debug(image_configs)
 
-        filtered_configs: list[ImageConfig] = [
-            image_config
-            for image_config in image_configs
-            if image_config.events is None
-            or payload.source.event in image_config.events
-        ]
+        filtered_configs: list[ImageConfig] = configs_for_event(
+            image_configs, payload.source.event
+        )
 
         logger.debug("Filtered configs")
         logger.debug(filtered_configs)

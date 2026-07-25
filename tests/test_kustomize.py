@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from odp_releaser.manifests.kustomize import update_kustomize_with_payload
+from odp_releaser.manifests.kustomize import (
+    image_entry_path,
+    image_pin_path,
+    update_kustomize_with_payload,
+)
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import KustomizeManifest
 
@@ -40,6 +44,27 @@ def _payload() -> ClientPayload:
                 "actor": "abkfenris",
             },
         }
+    )
+
+
+# --- Selector builders (pinned exact strings) --------------------------------
+
+
+def test_image_entry_path_exact_string() -> None:
+    assert image_entry_path("ghcr.io/owner/app") == '/images[name="ghcr.io/owner/app"]'
+
+
+def test_image_pin_path_tag_exact_string() -> None:
+    assert (
+        image_pin_path("ghcr.io/owner/app", "tag")
+        == '/images[name="ghcr.io/owner/app"]/newTag'
+    )
+
+
+def test_image_pin_path_digest_exact_string() -> None:
+    assert (
+        image_pin_path("ghcr.io/owner/app", "digest")
+        == '/images[name="ghcr.io/owner/app"]/digest'
     )
 
 
