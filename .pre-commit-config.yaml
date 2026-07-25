@@ -99,7 +99,7 @@ repos:
         # GitHub event payloads whose text can't be edited (e.g. the real PR
         # title "Dump Github Actions events")
         exclude: .pre-commit-config.yaml|tests/event_data/|tests/test_github_context.py|tests/test_make_payload.py
-      - id: odp-releaser-validate-image-manifest
+      - id: validate-image-manifest
         name: Validate odp-releaser image manifest
         # Dogfoods this project's own hook (see .pre-commit-hooks.yaml)
         # against the known-good e2e fixture only -- tests/manifests/ holds
@@ -109,7 +109,7 @@ repos:
         language: system
         files: ^tests/e2e/image_manifest\.yaml$
         pass_filenames: true
-      - id: odp-releaser-validate-deploy-targets
+      - id: validate-deploy-targets
         name: Validate odp-releaser deploy targets
         entry: uv run odp-releaser validate deploy-targets
         language: system

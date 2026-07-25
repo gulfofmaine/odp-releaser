@@ -137,8 +137,8 @@ repos:
   - repo: https://github.com/gulfofmaine/odp-releaser
     rev: "<pin to a released tag or commit SHA>"
     hooks:
-      - id: odp-releaser-validate-image-manifest
-      - id: odp-releaser-validate-deploy-targets
+      - id: validate-image-manifest
+      - id: validate-deploy-targets
 ```
 
 Each hook's default `files:` pattern only matches
