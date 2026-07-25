@@ -1065,3 +1065,52 @@ images:
     assert 'maintainer: "Renée"' in updated
     # The one thing that should have changed, did.
     assert "old-tag" not in updated
+
+
+@pytest.mark.parametrize("newline", ["\r\n", "\n"], ids=["crlf", "lf"])
+def test_manifest_line_endings_survive_a_bump(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, newline: str
+) -> None:
+    """A bump changes one tag, not every line ending in the file.
+
+    The manifest engines emit `\\n`, so a CRLF manifest used to come back
+    entirely LF; and with the default `newline=None` on write, an LF manifest
+    became CRLF on Windows (`os.linesep`). Either way a one-tag bump produced
+    a whole-file diff.
+    """
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    manifest = tmp_path / "kustomization.yaml"
+    lines = [
+        "apiVersion: kustomize.config.k8s.io/v1beta1",
+        "kind: Kustomization",
+        "images:",
+        "  - name: gmri/neracoos-mariners-dashboard",
+        '    newTag: "old-tag"',
+        "",
+    ]
+    manifest.write_bytes(newline.join(lines).encode("utf-8"))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      kustomize_manifests: [./kustomization.yaml]
+""",
+        encoding="utf-8",
+    )
+
+    bump_images(
+        config_path=config_path,
+        client_payload=_payload_for().model_dump_json(),
+        dry_run=False,
+    )
+
+    written = manifest.read_bytes()
+    assert b"old-tag" not in written, "the bump should still have applied"
+    crlf = written.count(b"\r\n")
+    bare_lf = written.count(b"\n") - crlf
+    if newline == "\r\n":
+        assert (crlf, bare_lf) == (len(lines) - 1, 0)
+    else:
+        assert (crlf, bare_lf) == (0, len(lines) - 1)

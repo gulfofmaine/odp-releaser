@@ -63,6 +63,21 @@ def tests(session: nox.Session) -> None:
     session.run("pytest", *session.posargs)
 
 
+@nox.session
+def test_locale(session: nox.Session) -> None:
+    """
+    Run tests under a non standard locale.
+    Often catches errors that might occur on Windows.
+    """
+    test_deps = nox.project.dependency_groups(PROJECT, "test")
+    session.install("-e.", *test_deps)
+    session.run(
+        "pytest",
+        *session.posargs,
+        env={"LC_ALL": "C", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0"},
+    )
+
+
 @nox.session(default=False)
 def schemas(session: nox.Session) -> None:
     """

@@ -18,7 +18,12 @@ from odp_releaser.github_output import write_github_output, write_step_summary
 from odp_releaser.logger import logger
 from odp_releaser.manifests.file import update_file_with_payload
 from odp_releaser.manifests.helm import update_helm_values_with_payload
-from odp_releaser.manifests.helpers import display_manifest_path, resolve_manifest_path
+from odp_releaser.manifests.helpers import (
+    display_manifest_path,
+    read_manifest_text,
+    resolve_manifest_path,
+    write_manifest_text,
+)
 from odp_releaser.manifests.kustomize import update_kustomize_with_payload
 from odp_releaser.report_metadata import ReportMetadata, embed_metadata
 from odp_releaser.schemas.client_payload import ClientPayload
@@ -56,7 +61,7 @@ def _apply_manifest[ManifestT: _HasPath](
     """
     manifest_path = resolve_manifest_path(config_path, manifest.path)
     display_path = display_manifest_path(manifest_path)
-    original_manifest = manifest_path.read_text(encoding="utf-8")
+    original_manifest, newline = read_manifest_text(manifest_path)
     manifest_messages: list[str] = []
     updated_manifest = update_fn(
         display_path, original_manifest, manifest, payload, manifest_messages
@@ -76,7 +81,7 @@ def _apply_manifest[ManifestT: _HasPath](
     logger.info(f"Diff for {manifest_path}:\n{'\n'.join(diff)}")
 
     if not dry_run:
-        manifest_path.write_text(updated_manifest, encoding="utf-8")
+        write_manifest_text(manifest_path, updated_manifest, newline)
         logger.warning(f"Wrote updated manifest for {manifest_path}")
     else:
         logger.warning(f"Dry run, not writing updated manifest for {manifest_path}")
