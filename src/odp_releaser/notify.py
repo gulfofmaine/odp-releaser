@@ -133,7 +133,14 @@ def load_targets(targets_path: Path) -> list[DeployTarget]:
     if not targets_path.exists():
         raise MissingDeployTargetsError(targets_path)
 
-    content = targets_path.read_text(encoding="utf-8").strip()
+    try:
+        content = targets_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        # ``exists()`` is true for a directory, and a file that isn't valid
+        # UTF-8 raises ``UnicodeDecodeError`` (a ``ValueError``, not an
+        # ``OSError``). Both used to escape as a raw traceback out of both
+        # ``notify`` and ``validate deploy-targets``.
+        raise InvalidDeployTargetsError(targets_path, str(exc)) from exc
     if not content:
         raise EmptyDeployTargetsError(targets_path)
 
@@ -154,6 +161,31 @@ def load_targets(targets_path: Path) -> list[DeployTarget]:
     if not targets:
         raise EmptyDeployTargetsError(targets_path)
     return targets
+
+
+def _log_targets_diagnostics(targets_path: Path) -> None:
+    """Log what ``validate deploy-targets`` would say about this file.
+
+    ``bump-images`` pre-flights its config and refuses to write when the
+    validator finds an error; ``notify`` deliberately does not, because the
+    problems only the validator catches (an unknown key, a duplicate target)
+    are ones ``notify`` still dispatches correctly around -- and failing a
+    release over them would contradict the decision to keep unknown keys a
+    ``validate``-only concern. Reporting them in the log costs nothing and
+    means a misconfigured target shows up in the run that dispatched it,
+    rather than only when someone thinks to run the validator.
+
+    Imported here rather than at module scope because
+    ``validation.deploy_targets`` imports this module for ``load_targets``.
+    """
+    # pylint: disable=import-outside-toplevel
+    from odp_releaser.validation.deploy_targets import (  # noqa: PLC0415
+        validate_deploy_targets,
+    )
+
+    diagnostics = validate_deploy_targets(targets_path)
+    for diagnostic in diagnostics.diagnostics:
+        logger.warning("%s", diagnostic.render())
 
 
 def _summary_table(results: list[TargetResult]) -> str:
@@ -237,6 +269,8 @@ def notify(
         logger.error("%s", exc)
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
+
+    _log_targets_diagnostics(targets_path)
 
     client_payload = payload.model_dump(mode="json")
 

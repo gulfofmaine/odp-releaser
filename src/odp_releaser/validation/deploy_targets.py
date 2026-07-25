@@ -117,7 +117,8 @@ def _load_raw_items(targets_path: Path) -> list[object] | None:
     """
     try:
         raw = YAML().load(targets_path.read_text(encoding="utf-8"))
-    except (OSError, YAMLError):
+    # UnicodeDecodeError subclasses ValueError, not OSError.
+    except (OSError, UnicodeDecodeError, YAMLError):
         return None
     if not isinstance(raw, list):
         return None

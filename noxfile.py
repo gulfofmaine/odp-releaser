@@ -107,12 +107,12 @@ def schemas(session: nox.Session) -> None:
 
         target = DIR / "schemas" / filename
         if check:
-            if target.read_text() != generated:
+            if target.read_text(encoding="utf-8") != generated:
                 stale.append(filename)
-        elif target.read_text() == generated:
+        elif target.read_text(encoding="utf-8") == generated:
             print(f"{filename} is up to date")
         else:
-            target.write_text(generated)
+            target.write_text(generated, encoding="utf-8")
             print(f"{filename} regenerated")
 
         Draft202012Validator.check_schema(json.loads(generated))

@@ -360,3 +360,29 @@ def test_load_raw_items_falls_back_to_no_line_numbers_when_reread_is_not_a_list(
     diagnostics = validate_deploy_targets(path)
 
     assert diagnostics.diagnostics == ()
+
+
+# --- inputs that aren't readable UTF-8 text -------------------------------------
+
+
+def test_directory_is_reported_not_a_traceback(tmp_path: Path) -> None:
+    """A directory passes `Path.exists()`, so it reached an unguarded read.
+
+    `IsADirectoryError` used to escape `load_targets` as a raw traceback, even
+    though `validate image-manifest` handled the same mistake cleanly.
+    """
+    diagnostics = validate_deploy_targets(tmp_path)
+
+    assert diagnostics.failed() is True
+    assert any("directory" in d.message.lower() for d in diagnostics.errors)
+
+
+def test_non_utf8_file_is_reported_not_a_traceback(tmp_path: Path) -> None:
+    """UnicodeDecodeError subclasses ValueError, so an OSError-only guard missed it."""
+    path = tmp_path / "deploy_targets.yaml"
+    path.write_bytes("- owner: gulfofmaine\n  repo: \xa3x\n".encode("latin-1"))
+
+    diagnostics = validate_deploy_targets(path)
+
+    assert diagnostics.failed() is True
+    assert any("utf-8" in d.message.lower() for d in diagnostics.errors)

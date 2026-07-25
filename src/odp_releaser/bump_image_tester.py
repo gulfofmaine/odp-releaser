@@ -126,7 +126,9 @@ def _image_names(config_path: Path) -> list[str] | None:
     """
     try:
         raw_config = config_path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError subclasses ValueError, not OSError; without it a
+        # non-UTF-8 config turned this best-effort prompt hint into a crash.
         return None
 
     yaml = ruamel.yaml.YAML(typ="safe", pure=True)

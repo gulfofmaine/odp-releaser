@@ -62,7 +62,9 @@ def load_manifest_text(
     try:
         text = resolved.read_text(encoding="utf-8")
         open_for_editing(text)
-    except (OSError, ManifestLoadError, YAMLError) as exc:
+    # UnicodeDecodeError subclasses ValueError, not OSError, so a manifest
+    # that isn't valid UTF-8 would escape an OSError-only guard as a traceback.
+    except (OSError, UnicodeDecodeError, ManifestLoadError, YAMLError) as exc:
         diagnostics.error(
             f"could not load manifest at {resolved}: {exc}",
             location=location.location,
