@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import odp_releaser.validation.deploy_targets as deploy_targets_module
 from odp_releaser.schemas.dispatch import DeployTarget
 from odp_releaser.validation.deploy_targets import validate_deploy_targets
 from odp_releaser.validation.diagnostics import Diagnostics, Severity
+
+if TYPE_CHECKING:
+    import pytest
 
 E2E_TARGETS = Path(__file__).parent / "e2e" / "deploy_targets.yaml"
 
@@ -288,3 +293,70 @@ def test_error_carries_a_line_number(tmp_path: Path) -> None:
     diagnostics = validate_deploy_targets(path)
     error = next(e for e in diagnostics.errors if e.location == "[1].owner")
     assert error.line == 3
+
+
+# --- _load_raw_items: the round-trip re-read genuinely can't fail once ----------
+# --- load_targets has already succeeded, so both branches below need a --------
+# --- deliberate double standing in for the re-read rather than a real file. ---
+
+
+class _RaisingYAML:
+    """Stand-in for ``ruamel.yaml.YAML`` whose ``.load`` always raises ``OSError``."""
+
+    def load(self, _text: str) -> object:
+        message = "simulated failure re-reading the targets file"
+        raise OSError(message)
+
+
+class _NonListYAML:
+    """Stand-in for ``ruamel.yaml.YAML`` whose ``.load`` returns a non-list."""
+
+    def load(self, _text: str) -> object:
+        return {"not": "a list"}
+
+
+def test_load_raw_items_falls_back_to_no_line_numbers_on_reread_oserror(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``load_targets`` already succeeded reading this exact file, so an
+    ``OSError``/``YAMLError`` from the separate round-trip re-read (done only
+    to get line numbers) can't happen from a real file -- simulated here by
+    swapping out the ``YAML`` class ``_load_raw_items`` re-reads with.
+    """
+    path = _write(
+        tmp_path,
+        """\
+- owner: gulfofmaine
+  repo: some-deploy-repo
+""",
+    )
+    monkeypatch.setattr(deploy_targets_module, "YAML", _RaisingYAML)
+
+    diagnostics = validate_deploy_targets(path)
+
+    # No line numbers available, but the target itself is still valid, so no
+    # diagnostics -- proving _load_raw_items degraded to None rather than
+    # raising or losing the rest of the walk.
+    assert diagnostics.diagnostics == ()
+
+
+def test_load_raw_items_falls_back_to_no_line_numbers_when_reread_is_not_a_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same fallback as above, for the "somehow isn't a list" guard: the
+    round-trip re-read of an already-list-shaped, already-validated file
+    would itself always come back as a (``CommentedSeq``) list, so this can
+    only be exercised by substituting the loader.
+    """
+    path = _write(
+        tmp_path,
+        """\
+- owner: gulfofmaine
+  repo: some-deploy-repo
+""",
+    )
+    monkeypatch.setattr(deploy_targets_module, "YAML", _NonListYAML)
+
+    diagnostics = validate_deploy_targets(path)
+
+    assert diagnostics.diagnostics == ()

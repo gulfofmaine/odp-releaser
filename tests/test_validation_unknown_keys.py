@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 from ruamel.yaml import YAML
 
 from odp_releaser.schemas.manifest_config import ManifestConfig
@@ -191,3 +192,135 @@ def test_plain_dict_without_ruamel_line_info_does_not_crash() -> None:
     assert len(diagnostics.diagnostics) == 1
     assert diagnostics.diagnostics[0].line is None
     assert diagnostics.diagnostics[0].location is None
+
+
+# --- Annotation shapes the config schema doesn't itself exercise -----------------
+#
+# ``report_unknown_keys``/``_recurse_into_field`` are generic over any pydantic
+# model shape, not just the ones ``ManifestConfig`` currently happens to use --
+# these throwaway models pin the branches that stay correct for shapes the
+# schema may grow into later, without adding anything to
+# ``odp_releaser.schemas``.
+
+
+class _NoFields(BaseModel):
+    """A model with no declared fields at all."""
+
+
+class _Inner(BaseModel):
+    a: str = ""
+
+
+class _WithDictModel(BaseModel):
+    """``dict[str, Model]`` -- distinct from ``ManifestConfig.images``'s
+    ``dict[str, list[Model]]``, which is the only dict-of-models shape the
+    real schema exercises.
+    """
+
+    items: dict[str, _Inner] = {}
+
+
+class _WithDictListStr(BaseModel):
+    """``dict[str, list[str]]``: the item type isn't a ``BaseModel``, so
+    recursion must stop rather than try to walk into a plain string.
+    """
+
+    items: dict[str, list[str]] = {}
+
+
+class _WithDictListModel(BaseModel):
+    """Mirrors ``ManifestConfig.images``'s own ``dict[str, list[Model]]`` shape."""
+
+    images: dict[str, list[_Inner]] = {}
+
+
+class _WithModelList(BaseModel):
+    """A bare ``list[Model]`` field, not nested inside a dict."""
+
+    manifests: list[_Inner] = []
+
+
+def test_unknown_key_message_has_no_valid_keys_suffix_for_a_fieldless_model() -> None:
+    diagnostics = Diagnostics(FILE)
+
+    report_unknown_keys(_NoFields, {"stray": 1}, diagnostics)
+
+    assert len(diagnostics.diagnostics) == 1
+    message = diagnostics.diagnostics[0].message
+    assert message == "Unknown key 'stray'"
+    assert "valid keys are" not in message
+
+
+def test_recursion_stops_when_a_fields_annotation_is_none() -> None:
+    """A field whose resolved annotation is the bare ``None`` object must not
+    crash the walker.
+
+    Ordinary class syntax can't produce this: ``x: None`` normalizes to
+    ``NoneType``, not the ``None`` object itself, so ``annotation is None`` is
+    a defensive branch for an annotation shape pydantic doesn't currently
+    hand back -- pinned here by mutating a real ``FieldInfo`` directly.
+    """
+
+    class _Model(BaseModel):
+        x: int = 0
+
+    _Model.model_fields["x"].annotation = None
+    diagnostics = Diagnostics(FILE)
+
+    report_unknown_keys(_Model, {"x": {"bad": 1}}, diagnostics)
+
+    assert diagnostics.diagnostics == ()
+
+
+def test_dict_str_model_field_recurses_into_each_value() -> None:
+    diagnostics = Diagnostics(FILE)
+    data = {"items": {"foo": {"a": "x", "bad": 1}}}
+
+    report_unknown_keys(_WithDictModel, data, diagnostics)
+
+    assert len(diagnostics.diagnostics) == 1
+    assert "'bad'" in diagnostics.diagnostics[0].message
+    assert diagnostics.diagnostics[0].location == 'items."foo"'
+
+
+def test_dict_str_model_field_with_non_mapping_value_is_skipped() -> None:
+    """A ``dict[str, Model]`` field whose YAML value isn't itself a mapping
+    (e.g. a typo'd scalar) has no entries to recurse into.
+    """
+    diagnostics = Diagnostics(FILE)
+
+    report_unknown_keys(_WithDictModel, {"items": "not-a-mapping"}, diagnostics)
+
+    assert diagnostics.diagnostics == ()
+
+
+def test_dict_str_list_str_field_does_not_recurse_into_items() -> None:
+    diagnostics = Diagnostics(FILE)
+
+    report_unknown_keys(_WithDictListStr, {"items": {"foo": ["a", "b"]}}, diagnostics)
+
+    assert diagnostics.diagnostics == ()
+
+
+def test_dict_str_list_model_field_skips_a_key_whose_value_is_not_a_list() -> None:
+    """One key's value being malformed (not a list) must not stop the walker
+    from still recursing into the other, well-formed keys.
+    """
+    diagnostics = Diagnostics(FILE)
+    data = {"images": {"foo": "not-a-list", "bar": [{"a": "x", "bad": 1}]}}
+
+    report_unknown_keys(_WithDictListModel, data, diagnostics)
+
+    assert len(diagnostics.diagnostics) == 1
+    assert diagnostics.diagnostics[0].location == 'images."bar"[0]'
+
+
+def test_list_model_field_with_non_list_value_is_skipped() -> None:
+    """A ``list[Model]`` field whose YAML value isn't a list at all (e.g. a
+    typo'd scalar) has no items to recurse into.
+    """
+    diagnostics = Diagnostics(FILE)
+
+    report_unknown_keys(_WithModelList, {"manifests": "not-a-list"}, diagnostics)
+
+    assert diagnostics.diagnostics == ()

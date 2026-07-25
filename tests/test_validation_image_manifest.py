@@ -71,6 +71,13 @@ def test_config_location_child_overrides_line() -> None:
     assert child.line == 9
 
 
+def test_config_location_child_of_an_empty_base_location_is_just_the_suffix() -> None:
+    """No parent to dot-join against: the child's location is the bare suffix."""
+    location = ConfigLocation("")
+    child = location.child("images")
+    assert child.location == "images"
+
+
 # --- Template keys stay in sync with ClientPayload ---------------------------
 
 
@@ -123,6 +130,30 @@ images:
     )
     diagnostics = validate_image_manifest(path)
     assert any("bad_key" in m for m in _messages(diagnostics))
+
+
+def test_image_with_no_configs_matching_the_payload_event_is_skipped(
+    tmp_path: Path,
+) -> None:
+    """When every one of an image's configs is filtered out by the payload's
+    event (none of them match), there's nothing left to semantically check
+    for that image -- distinct from the image itself being filtered out by
+    ``payload.image_name`` a few lines above.
+    """
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [release]
+""",
+    )
+    payload = _payload()  # a "push" event payload; see load_client_payload above
+    assert payload.source.event == "push"
+
+    diagnostics = validate_image_manifest(path, payload=payload, check_files=False)
+
+    assert diagnostics.diagnostics == ()
 
 
 # --- Dogfood fixtures ----------------------------------------------------------
@@ -204,6 +235,7 @@ images:
         pytest.param("gmri/app:tag", True, id="colon"),
         pytest.param("gmri/app@sha256:abc", True, id="at-sign"),
         pytest.param(" gmri/app", True, id="leading-whitespace"),
+        pytest.param("", True, id="empty"),
     ],
 )
 def test_image_name_shape(
@@ -438,6 +470,58 @@ images:
     assert diagnostics.failed() is True
 
 
+def test_set_value_static_checks_pass_but_real_format_call_still_fails(
+    tmp_path: Path,
+) -> None:
+    """A field name in ``TEMPLATE_KEYS`` isn't the whole story: a format spec
+    that's invalid for the placeholder's actual value (a hex tag isn't a
+    float) only fails once ``value.format(**payload.value_format_kwargs())``
+    is actually attempted against a real payload -- the static placeholder-name
+    check alone can't catch it.
+    """
+    payload = _payload()
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      file_manifests:
+        - path: ./values.yaml
+          set:
+            '/some/path': "{new_tag:.2f}"
+""",
+    )
+    diagnostics = validate_image_manifest(path, payload=payload, check_files=False)
+    assert diagnostics.failed() is True
+    assert any(
+        "failed to format with the real payload" in m for m in _messages(diagnostics)
+    )
+
+
+def test_clean_file_manifest_reaches_the_engine_backstop(tmp_path: Path) -> None:
+    """A file manifest with nothing for the hand-rolled checks to flag must
+    still be run through the real ``update_file_with_payload`` engine as a
+    backstop -- proven here since no fixture otherwise exercises a clean
+    ``file_manifests`` entry with ``check_files`` enabled.
+    """
+    (tmp_path / "values.yaml").write_text("some:\n  path: old\n")
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      file_manifests:
+        - path: ./values.yaml
+          set:
+            '/some/path': "{new_tag}"
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    assert diagnostics.diagnostics == ()
+
+
 # --- E6/W5/W6: kustomize pin checks --------------------------------------------
 
 
@@ -581,6 +665,28 @@ images:
     assert any(
         d.location == "defaults.allowed_source_repos" for d in diagnostics.diagnostics
     )
+
+
+def test_defaults_level_environment_url_template_is_checked(tmp_path: Path) -> None:
+    """``defaults.environment_url`` gets the same template check as a
+    config's own ``environment_url`` -- checked once at the defaults level
+    rather than only after a config resolves it.
+    """
+    path = _write(
+        tmp_path,
+        """
+defaults:
+  environment_url: "https://example.com/{sha}"
+images:
+  gmri/app:
+    - events: [push]
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    error = next(
+        d for d in diagnostics.diagnostics if "unknown placeholder" in d.message
+    )
+    assert error.location == "defaults.environment_url"
 
 
 # --- W1: silent no-op config ----------------------------------------------------
