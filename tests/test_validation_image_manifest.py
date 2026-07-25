@@ -10,6 +10,8 @@ from odp_releaser.bump_image_tester import (
     load_client_payload,
     set_payload_image,
 )
+from odp_releaser.manifests.helm import dagster_deployment_path
+from odp_releaser.manifests.kustomize import image_pin_path
 from odp_releaser.schemas.manifest_config import ConfigDefaults, ImageConfig
 from odp_releaser.validation.diagnostics import Diagnostics, Severity
 from odp_releaser.validation.image_manifest import (
@@ -477,6 +479,29 @@ images:
     assert any("mustexist=False" in m for m in _messages(diagnostics))
 
 
+def test_pin_tag_error_names_the_engines_own_selector(tmp_path: Path) -> None:
+    """The validator's 'newTag missing' error must name the exact path the
+    kustomize engine writes -- proving both sides share
+    ``kustomize.image_pin_path`` rather than each spelling the selector out.
+    """
+    (tmp_path / "kustomization.yaml").write_text(
+        'images:\n  - name: gmri/other\n    newTag: "1"\n'
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      kustomize_manifests:
+        - ./kustomization.yaml
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    expected_selector = image_pin_path("gmri/app", "tag")
+    assert any(expected_selector in m for m in _messages(diagnostics))
+
+
 def test_kustomize_both_tag_and_digest_warns(tmp_path: Path) -> None:
     (tmp_path / "kustomization.yaml").write_text(
         'images:\n  - name: gmri/app\n    newTag: "1"\n    digest: "sha256:deadbeef"\n'
@@ -669,6 +694,32 @@ images:
     diagnostics = validate_image_manifest(path)
     assert diagnostics.errors == ()
     assert any("dagster_user_code is true" in m for m in _messages(diagnostics))
+
+
+def test_dagster_user_code_warning_names_the_engines_own_selector(
+    tmp_path: Path,
+) -> None:
+    """The validator's 'no deployment entry' warning must name the exact
+    entry selector the helm engine matches against -- proving both sides
+    share ``helm.dagster_deployment_path``.
+    """
+    (tmp_path / "values.yaml").write_text(
+        'deployments:\n  - name: other\n    image:\n      repository: gmri/other\n      tag: "1"\n'
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      helm_charts:
+        - path: ./values.yaml
+          dagster_user_code: true
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    expected_selector = dagster_deployment_path("gmri/app")
+    assert any(expected_selector in m for m in _messages(diagnostics))
 
 
 def test_dagster_user_code_with_matching_deployment_is_clean(tmp_path: Path) -> None:

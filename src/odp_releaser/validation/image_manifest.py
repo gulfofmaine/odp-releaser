@@ -15,6 +15,18 @@ entry that hard-exits the whole run, and so on. Running these checks ahead of
 time -- in CI on the config repo, or as a ``bump-images --dry-run`` pre-flight
 -- turns a mid-release failure into a fast, readable diagnostic.
 
+The engines (``update_kustomize_with_payload``, ``update_helm_values_with_payload``,
+``update_file_with_payload``) are pure ``(path, text, manifest, payload,
+commit_message) -> str`` functions with no filesystem I/O of their own
+(``bump_images._apply_manifest`` does all the reading and writing) -- so
+they're the actual source of truth for "would this manifest apply cleanly",
+not a prediction of it. Every hand-rolled check below exists *only* for
+message quality (naming the offending selector/placeholder and listing valid
+alternatives): once a manifest's checks report no error, :mod:`.engine_backstop`
+runs the real engine against the manifest's actual text and turns any
+exception into a diagnostic, catching whatever failure mode the hand-rolled
+checks don't (yet) model without needing to be kept in sync by hand.
+
 ``validate_image_manifest`` is the file-level entry point: it reads and
 parses the file, schema-validates it, and then walks every ``images:`` entry.
 ``validate_image_configs`` does the semantic checks for one image's configs
@@ -40,7 +52,21 @@ from ruamel.yaml.error import YAMLError
 from yamlpath import Processor, YAMLPath
 from yamlpath.exceptions import YAMLPathException
 
-from odp_releaser.manifests.helpers import ManifestLoadError, open_for_editing
+from odp_releaser.manifests.file import update_file_with_payload
+from odp_releaser.manifests.helm import (
+    dagster_deployment_path,
+    update_helm_values_with_payload,
+)
+from odp_releaser.manifests.helpers import (
+    display_manifest_path,
+    open_for_editing,
+    resolve_manifest_path,
+)
+from odp_releaser.manifests.kustomize import (
+    image_entry_path,
+    image_pin_path,
+    update_kustomize_with_payload,
+)
 from odp_releaser.schemas.manifest_config import (
     AllowedActors,
     ConfigDefaults,
@@ -49,9 +75,15 @@ from odp_releaser.schemas.manifest_config import (
     ImageConfig,
     KustomizeManifest,
     ManifestConfig,
+    config_matches_event,
     resolve_setting,
 )
 from odp_releaser.validation.diagnostics import Diagnostics
+from odp_releaser.validation.engine_backstop import (
+    representative_event,
+    run_engine_backstop,
+)
+from odp_releaser.validation.manifest_text import load_manifest_text
 from odp_releaser.validation.ruamel_lines import line_for_index, line_for_key
 from odp_releaser.validation.unknown_keys import report_unknown_keys
 
@@ -197,8 +229,7 @@ def validate_image_manifest(
             (index, image_config)
             for index, image_config in enumerate(image_configs)
             if payload is None
-            or image_config.events is None
-            or payload.source.event in image_config.events
+            or config_matches_event(image_config, payload.source.event)
         ]
         if not matching:
             continue
@@ -253,7 +284,7 @@ def validate_image_configs(
         location if location is not None else ConfigLocation(f'images."{image_name}"')
     )
 
-    cache: dict[Path, Processor | None] = {}
+    cache: dict[Path, str | None] = {}
 
     for index, image_config in enumerate(image_configs):
         item_location = base.child(f"[{index}]")
@@ -399,7 +430,7 @@ def _validate_config_item(
     defaults: ConfigDefaults,
     location: ConfigLocation,
     diagnostics: Diagnostics,
-    cache: dict[Path, Processor | None],
+    cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
     check_files: bool,
@@ -447,6 +478,8 @@ def _validate_config_item(
             warn_if_no_placeholder=False,
         )
 
+    event = representative_event(image_config)
+
     for index, kustomize_manifest in enumerate(image_config.kustomize_manifests):
         _validate_kustomize(
             config_path,
@@ -456,6 +489,7 @@ def _validate_config_item(
             diagnostics,
             cache,
             payload=payload,
+            event=event,
             check_files=check_files,
         )
 
@@ -468,57 +502,22 @@ def _validate_config_item(
             diagnostics,
             cache,
             payload=payload,
+            event=event,
             check_files=check_files,
         )
 
     for index, file_manifest in enumerate(image_config.file_manifests):
         _validate_file_manifest(
             config_path,
+            image_name,
             file_manifest,
             location.child(f"file_manifests[{index}]"),
             diagnostics,
             cache,
             payload=payload,
+            event=event,
             check_files=check_files,
         )
-
-
-def _load_processor(
-    cache: dict[Path, Processor | None],
-    diagnostics: Diagnostics,
-    config_path: Path,
-    manifest_relative_path: Path,
-    location: ConfigLocation,
-    *,
-    check_files: bool,
-) -> Processor | None:
-    """Load the manifest ``open_for_editing`` would, caching by resolved path.
-
-    Resolved exactly like ``bump_images._apply_manifest`` does, so a
-    diagnostic here reflects the same file the runtime would (or wouldn't)
-    find. Loaded at most once per run: several configs commonly point at the
-    same file (e.g. a shared ``values.yaml``), and re-parsing it per config
-    would both waste time and report the same load failure repeatedly.
-    """
-    if not check_files:
-        return None
-    resolved = (config_path.parent / manifest_relative_path).resolve()
-    if resolved in cache:
-        return cache[resolved]
-
-    processor: Processor | None
-    try:
-        text = resolved.read_text()
-        processor = open_for_editing(text)
-    except (OSError, ManifestLoadError, YAMLError) as exc:
-        diagnostics.error(
-            f"could not load manifest at {resolved}: {exc}",
-            location=location.location,
-            line=location.line,
-        )
-        processor = None
-    cache[resolved] = processor
-    return processor
 
 
 def _node_exists(processor: Processor, selector: str) -> bool:
@@ -551,12 +550,14 @@ def _validate_kustomize(
     manifest: KustomizeManifest,
     location: ConfigLocation,
     diagnostics: Diagnostics,
-    cache: dict[Path, Processor | None],
+    cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
+    event: str,
     check_files: bool,
 ) -> None:
-    processor = _load_processor(
+    error_count = len(diagnostics.errors)
+    text = load_manifest_text(
         cache,
         diagnostics,
         config_path,
@@ -564,42 +565,63 @@ def _validate_kustomize(
         location,
         check_files=check_files,
     )
+    processor = open_for_editing(text) if text is not None else None
     _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
 
-    if processor is None:
-        return
-
-    image_selector = f'/images[name="{image_name}"]'
-    if manifest.pin == "tag":
-        tag_selector = f"{image_selector}/newTag"
-        if not _node_exists(processor, tag_selector):
-            diagnostics.error(
-                f"{tag_selector} does not exist, but pin is 'tag' and "
-                "bump-images sets it with mustexist=True",
+    if processor is not None:
+        image_selector = image_entry_path(image_name)
+        if manifest.pin == "tag":
+            # update_kustomize_with_payload writes exactly this path when pin
+            # is "tag", with mustexist=True -- so a missing node here is
+            # fatal at bump time.
+            tag_selector = image_pin_path(image_name, "tag")
+            if not _node_exists(processor, tag_selector):
+                diagnostics.error(
+                    f"{tag_selector} does not exist, but pin is 'tag' and "
+                    "bump-images sets it with mustexist=True",
+                    location=location.child("pin").location,
+                    line=location.line,
+                )
+        elif not _node_exists(processor, image_selector):
+            # pin is "digest": the engine writes image_pin_path(image_name,
+            # "digest") with mustexist=False, which can create the missing
+            # "digest" leaf but not a missing "images[name=...]" entry itself
+            # -- so what actually blocks the write is the *entry*, checked
+            # here.
+            diagnostics.warning(
+                f"no {image_selector} entry exists yet; pin is 'digest', "
+                "and bump-images sets the digest with mustexist=False there, "
+                "which won't create a missing images entry",
                 location=location.child("pin").location,
                 line=location.line,
             )
-    elif not _node_exists(processor, image_selector):
-        diagnostics.warning(
-            f"no {image_selector} entry exists yet; pin is 'digest', "
-            "and bump-images sets the digest with mustexist=False there, "
-            "which won't create a missing images entry",
-            location=location.child("pin").location,
-            line=location.line,
-        )
 
-    images_node = _get_node(processor, image_selector)
-    if (
-        isinstance(images_node, Mapping)
-        and "newTag" in images_node
-        and "digest" in images_node
-    ):
-        diagnostics.warning(
-            f"{image_selector} has both newTag and digest set; "
-            "kustomize prefers digest over newTag, so bumping the tag has "
-            "no visible effect",
-            location=location.location,
-            line=location.line,
+        images_node = _get_node(processor, image_selector)
+        if (
+            isinstance(images_node, Mapping)
+            and "newTag" in images_node
+            and "digest" in images_node
+        ):
+            diagnostics.warning(
+                f"{image_selector} has both newTag and digest set; "
+                "kustomize prefers digest over newTag, so bumping the tag "
+                "has no visible effect",
+                location=location.location,
+                line=location.line,
+            )
+
+    if text is not None and len(diagnostics.errors) == error_count:
+        resolved = resolve_manifest_path(config_path, manifest.path)
+        run_engine_backstop(
+            display_manifest_path(resolved),
+            text,
+            manifest,
+            update_kustomize_with_payload,
+            image_name,
+            event,
+            payload,
+            location,
+            diagnostics,
         )
 
 
@@ -609,12 +631,14 @@ def _validate_helm(
     manifest: HelmManifest,
     location: ConfigLocation,
     diagnostics: Diagnostics,
-    cache: dict[Path, Processor | None],
+    cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
+    event: str,
     check_files: bool,
 ) -> None:
-    processor = _load_processor(
+    error_count = len(diagnostics.errors)
+    text = load_manifest_text(
         cache,
         diagnostics,
         config_path,
@@ -622,32 +646,53 @@ def _validate_helm(
         location,
         check_files=check_files,
     )
+    processor = open_for_editing(text) if text is not None else None
     _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
 
-    if not manifest.dagster_user_code or processor is None:
-        return
-    selector = f'/deployments[image.repository="{image_name}"]'
-    if not _node_exists(processor, selector):
-        diagnostics.warning(
-            f"dagster_user_code is true but no {selector} entry exists; "
-            "bump-images only logs a warning and leaves the file unchanged "
-            "in that case",
-            location=location.child("dagster_user_code").location,
-            line=location.line,
+    if manifest.dagster_user_code and processor is not None:
+        # bump-images matches (and, if a deployment matches, writes)
+        # dagster_tag_path; this only needs to know a deployment entry exists
+        # at all, which is dagster_deployment_path (the same prefix that tag
+        # path is built from).
+        selector = dagster_deployment_path(image_name)
+        if not _node_exists(processor, selector):
+            diagnostics.warning(
+                f"dagster_user_code is true but no {selector} entry exists; "
+                "bump-images only logs a warning and leaves the file "
+                "unchanged in that case",
+                location=location.child("dagster_user_code").location,
+                line=location.line,
+            )
+
+    if text is not None and len(diagnostics.errors) == error_count:
+        resolved = resolve_manifest_path(config_path, manifest.path)
+        run_engine_backstop(
+            display_manifest_path(resolved),
+            text,
+            manifest,
+            update_helm_values_with_payload,
+            image_name,
+            event,
+            payload,
+            location,
+            diagnostics,
         )
 
 
 def _validate_file_manifest(
     config_path: Path,
+    image_name: str,
     manifest: FileManifest,
     location: ConfigLocation,
     diagnostics: Diagnostics,
-    cache: dict[Path, Processor | None],
+    cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
+    event: str,
     check_files: bool,
 ) -> None:
-    processor = _load_processor(
+    error_count = len(diagnostics.errors)
+    text = load_manifest_text(
         cache,
         diagnostics,
         config_path,
@@ -655,7 +700,22 @@ def _validate_file_manifest(
         location,
         check_files=check_files,
     )
+    processor = open_for_editing(text) if text is not None else None
     _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
+
+    if text is not None and len(diagnostics.errors) == error_count:
+        resolved = resolve_manifest_path(config_path, manifest.path)
+        run_engine_backstop(
+            display_manifest_path(resolved),
+            text,
+            manifest,
+            update_file_with_payload,
+            image_name,
+            event,
+            payload,
+            location,
+            diagnostics,
+        )
 
 
 def _validate_set(
@@ -834,7 +894,7 @@ def _check_cross_config(
         indices = frozenset(
             index
             for index, image_config in enumerate(image_configs)
-            if image_config.events is None or event in image_config.events
+            if config_matches_event(image_config, event)
         )
         if not indices or indices in seen_groups:
             continue
@@ -867,7 +927,7 @@ def _check_duplicate_manifest_targets(
             *image_config.file_manifests,
         ]
         for manifest in manifests:
-            resolved = (config_path.parent / manifest.path).resolve()
+            resolved = resolve_manifest_path(config_path, manifest.path)
             counts[resolved] = counts.get(resolved, 0) + 1
 
     for resolved, count in counts.items():
