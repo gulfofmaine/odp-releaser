@@ -118,6 +118,83 @@ images:
     assert any("update_mode" in (loc or "") for loc in _locations(diagnostics))
 
 
+def test_schema_validation_error_reports_the_offending_line(tmp_path: Path) -> None:
+    """A pydantic ``ValidationError`` gets a line number too, walked from its
+    ``loc`` tuple through the raw ruamel data -- not just the semantic
+    checks' hand-built :class:`ConfigLocation`\\ s.
+    """
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      update_mode: not_a_real_mode
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    error = next(d for d in diagnostics.errors if "update_mode" in (d.location or ""))
+    assert error.line == 5
+
+
+def test_schema_validation_error_nested_in_a_list_reports_at_least_the_configs_line(
+    tmp_path: Path,
+) -> None:
+    """A bad value nested inside ``kustomize_manifests[1]`` walks the pydantic
+    error's ``loc`` all the way down to the offending key's own line -- at
+    least as specific as (here, deeper than) the enclosing config item's line.
+    """
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      kustomize_manifests:
+        - ./a.yaml
+        - path: ./b.yaml
+          pin: bogus
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    error = next(d for d in diagnostics.errors if "pin" in (d.location or ""))
+    assert error.line == 8
+
+
+def test_yaml_parse_error_reports_the_opening_line_not_stream_end(
+    tmp_path: Path,
+) -> None:
+    """An unterminated flow mapping's actionable line is where it *opened*
+    (ruamel's ``context_mark``), not wherever the parser gave up looking for
+    the closing ``}`` (``problem_mark``, often past the end of the file) --
+    the ``set: {`` line here is line 6, one line before EOF.
+    """
+    path = _write(
+        tmp_path,
+        """defaults:
+  environment: staging
+images:
+  gmri/app:
+    - events: [push]
+      set: {a: 1, b: 2
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    assert len(diagnostics.diagnostics) == 1
+    assert diagnostics.errors[0].line == 6
+
+
+def test_yaml_parse_error_message_does_not_repeat_the_config_path(
+    tmp_path: Path,
+) -> None:
+    """The diagnostic prefix (``path:line:``) already names the file; the
+    message body shouldn't repeat it.
+    """
+    path = _write(tmp_path, "images:\n  gmri/app: [\n")
+    diagnostics = validate_image_manifest(path)
+    assert str(path) not in diagnostics.errors[0].message
+
+
 def test_unknown_keys_are_still_reported_before_semantic_checks(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
@@ -748,6 +825,70 @@ images:
     )
 
 
+def test_reviewers_never_used_warning_considers_a_sibling_config_forcing_pull_request(
+    tmp_path: Path,
+) -> None:
+    """The regression case: a ``commit`` config sets ``reviewers``, but a
+    sibling matching the same event sets ``update_mode: pull_request`` --
+    ``bump_images.bump_images`` resolves ``update_mode`` across every
+    matching config and unconditionally prefers ``pull_request`` if any of
+    them sets it (~186-193), so ``alice`` *is* requested at runtime. The old
+    per-config check only looked at this one config's own ``update_mode``
+    and warned wrongly.
+    """
+    (tmp_path / "a.yaml").write_text('images:\n  - name: gmri/app\n    newTag: "1"\n')
+    (tmp_path / "b.yaml").write_text('images:\n  - name: gmri/app\n    newTag: "1"\n')
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      reviewers: [alice]
+      kustomize_manifests:
+        - ./a.yaml
+    - events: [push]
+      update_mode: pull_request
+      kustomize_manifests:
+        - ./b.yaml
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    assert not any(
+        "never used" in m or "never be used" in m for m in _messages(diagnostics)
+    )
+
+
+def test_reviewers_never_used_warning_still_fires_when_every_sibling_is_commit(
+    tmp_path: Path,
+) -> None:
+    """When a config's *only* sibling for the event is also ``commit``, the
+    effective ``update_mode`` is still ``commit`` -- so the warning must
+    still fire, unlike the previous test where a sibling forces
+    ``pull_request``.
+    """
+    (tmp_path / "a.yaml").write_text('images:\n  - name: gmri/app\n    newTag: "1"\n')
+    (tmp_path / "b.yaml").write_text('images:\n  - name: gmri/app\n    newTag: "1"\n')
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      reviewers: [alice]
+      kustomize_manifests:
+        - ./a.yaml
+    - events: [push]
+      kustomize_manifests:
+        - ./b.yaml
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    assert any(
+        "never used" in m or "never be used" in m for m in _messages(diagnostics)
+    )
+
+
 # --- W3/W4: allowlists that deny everyone/everything ----------------------------
 
 
@@ -921,6 +1062,43 @@ images:
     assert any("disagree on update_mode" in m for m in _messages(diagnostics))
 
 
+def test_disagreeing_update_mode_message_names_pull_request_as_the_winner(
+    tmp_path: Path,
+) -> None:
+    """Unlike the ``resolve_setting``-based attributes below (which really
+    do use the first config's value), ``update_mode`` has bespoke runtime
+    logic (``bump_images.bump_images`` ~186-193) that always picks
+    ``pull_request`` when any matching config sets it -- regardless of
+    order. Here the *first* config is ``commit``, so a message claiming
+    "uses the first" would tell the user the opposite of what actually
+    happens.
+    """
+    (tmp_path / "kustomization.yaml").write_text(
+        'images:\n  - name: gmri/app\n    newTag: "1"\n'
+    )
+    (tmp_path / "other.yaml").write_text(
+        'images:\n  - name: gmri/app\n    newTag: "1"\n'
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      kustomize_manifests:
+        - ./kustomization.yaml
+    - events: [push]
+      update_mode: pull_request
+      kustomize_manifests:
+        - ./other.yaml
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    message = next(m for m in _messages(diagnostics) if "disagree on update_mode" in m)
+    assert "pull_request" in message
+    assert "uses the first" not in message
+
+
 def test_disagreeing_environment_across_matching_configs_warns(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
@@ -976,3 +1154,43 @@ def test_validate_image_configs_appends_to_passed_diagnostics(tmp_path: Path) ->
     assert "pre-existing problem" in _messages(diagnostics)
     # The no-op W1 warning for the single (manifest-less) config is also present.
     assert any("silent no-op" in m for m in _messages(diagnostics))
+
+
+def test_non_utf8_referenced_manifest_is_reported_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """A referenced manifest that isn't UTF-8 is a diagnostic, not a crash.
+
+    `UnicodeDecodeError` subclasses `ValueError`, so it slipped past the
+    `OSError` guard around the manifest load.
+    """
+    (tmp_path / "kustomization.yaml").write_bytes(
+        'images:\n  - name: gmri/app  # \xa3\n    newTag: "old"\n'.encode("latin-1")
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      kustomize_manifests: [./kustomization.yaml]
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.failed() is True
+    assert any("utf-8" in d.message.lower() for d in diagnostics.errors)
+
+
+def test_non_utf8_config_file_is_reported_not_a_traceback(tmp_path: Path) -> None:
+    """The config file's own read needs the same guard as the manifests it names."""
+    path = tmp_path / "image_manifest.yaml"
+    path.write_bytes(
+        "images:\n  gmri/app:  # \xa3\n    - events: [push]\n".encode("latin-1")
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.failed() is True
+    assert any("utf-8" in d.message.lower() for d in diagnostics.errors)

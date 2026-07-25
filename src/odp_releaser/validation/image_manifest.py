@@ -43,8 +43,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from string import Formatter
-from types import NoneType
-from typing import TYPE_CHECKING, Any, get_args
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 from ruamel.yaml import YAML
@@ -76,8 +75,8 @@ from odp_releaser.schemas.manifest_config import (
     KustomizeManifest,
     ManifestConfig,
     config_matches_event,
-    resolve_setting,
 )
+from odp_releaser.validation.cross_config import check_cross_config
 from odp_releaser.validation.diagnostics import Diagnostics
 from odp_releaser.validation.engine_backstop import (
     representative_event,
@@ -101,12 +100,6 @@ if TYPE_CHECKING:
 TEMPLATE_KEYS: frozenset[str] = frozenset({"new_tag", "git_sha", "digest", "payload"})
 
 _INVALID_IMAGE_NAME_CHARS = ("@", ":")
-
-# The settings ``bump_images`` resolves per matching config (falling back to
-# `defaults` via `resolve_setting`) and warns about when matching configs for
-# one event disagree; kept as a tuple (not hardcoded per-call) so the
-# agreement check covers exactly the same set `bump_images` itself resolves.
-_AGREEMENT_ATTRS = ("environment", "environment_url", "reviewers", "team_reviewers")
 
 
 @dataclass(frozen=True)
@@ -168,7 +161,9 @@ def validate_image_manifest(
 
     try:
         raw_config = config_path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
+        # UnicodeDecodeError subclasses ValueError, not OSError, so a config
+        # that isn't valid UTF-8 escaped an OSError-only guard as a traceback.
         diagnostics.error(f"Could not read {config_path}: {exc}")
         return diagnostics
 
@@ -176,9 +171,7 @@ def validate_image_manifest(
     try:
         data = yaml.load(raw_config)
     except YAMLError as exc:
-        diagnostics.error(
-            f"Could not parse {config_path} as YAML: {exc}", line=_yaml_error_line(exc)
-        )
+        diagnostics.error(f"Could not parse as YAML: {exc}", line=_yaml_error_line(exc))
         return diagnostics
 
     report_unknown_keys(ManifestConfig, data, diagnostics, allowed_key_prefixes=("x-",))
@@ -188,7 +181,11 @@ def validate_image_manifest(
     except ValidationError as exc:
         for error in exc.errors():
             error_location = ".".join(str(part) for part in error["loc"])
-            diagnostics.error(error["msg"], location=error_location or None)
+            diagnostics.error(
+                error["msg"],
+                location=error_location or None,
+                line=_line_for_loc(data, error["loc"]),
+            )
         return diagnostics
 
     images_data = data.get("images") if isinstance(data, Mapping) else None
@@ -292,7 +289,6 @@ def validate_image_configs(
             config_path,
             image_name,
             image_config,
-            defaults,
             item_location,
             diagnostics,
             cache,
@@ -300,7 +296,7 @@ def validate_image_configs(
             check_files=check_files,
         )
 
-    _check_cross_config(
+    check_cross_config(
         config_path, image_name, image_configs, defaults, base, diagnostics
     )
 
@@ -311,10 +307,53 @@ def validate_image_configs(
 
 
 def _yaml_error_line(exc: YAMLError) -> int | None:
-    """Best-effort 1-based line for a ruamel ``YAMLError``, when it has a mark."""
-    mark = getattr(exc, "problem_mark", None)
+    """Best-effort 1-based line for a ruamel ``YAMLError``, when it has a mark.
+
+    Prefers ``context_mark`` -- where the construct that never got closed
+    actually *opened* (e.g. the ``{`` of an unterminated flow mapping) --
+    over ``problem_mark``, which for this class of error sits wherever the
+    parser gave up looking (often the end of the stream, well past anything
+    a reader could act on). Falls back to ``problem_mark`` when there's no
+    context mark at all, which is the common case for simpler errors that
+    only ever have one relevant location.
+    """
+    mark = getattr(exc, "context_mark", None) or getattr(exc, "problem_mark", None)
     line = getattr(mark, "line", None)
     return line + 1 if isinstance(line, int) else None
+
+
+def _line_for_loc(data: object, loc: tuple[int | str, ...]) -> int | None:
+    """Deepest known source line along a pydantic error's ``loc`` path.
+
+    A ``ValidationError``'s ``.errors()`` carry only a dotted/indexed
+    ``loc`` (e.g. ``("images", "gmri/two", 0, "update_mode")``), never a
+    line -- unlike the semantic checks elsewhere in this module, which
+    already have a :class:`ConfigLocation` to hand a line from. This walks
+    ``loc`` through the raw ruamel-loaded ``data`` (never the validated
+    model, which carries no ``lc`` info), reusing ``line_for_key``/
+    ``line_for_index`` -- the same helpers every other line lookup in this
+    module goes through -- rather than re-deriving ``.lc.data`` indexing
+    here. Each step remembers the best (deepest) line found so far and only
+    descends into ``node``'s child when that key/index actually exists
+    there; the walk stops (falling back to whatever line was already found,
+    or ``None``) the moment a step doesn't resolve, since a ``loc`` entry
+    can reference something pydantic synthesized (e.g. a discriminated
+    union arm) that has no corresponding raw node.
+    """
+    node = data
+    line: int | None = None
+    for part in loc:
+        if isinstance(part, str) and isinstance(node, Mapping) and part in node:
+            found = line_for_key(node, part)
+            node = node[part]
+        elif isinstance(part, int) and isinstance(node, list) and 0 <= part < len(node):
+            found = line_for_index(node, part)
+            node = node[part]
+        else:
+            break
+        if found is not None:
+            line = found
+    return line
 
 
 def _check_image_name(
@@ -427,7 +466,6 @@ def _validate_config_item(
     config_path: Path,
     image_name: str,
     image_config: ImageConfig,
-    defaults: ConfigDefaults,
     location: ConfigLocation,
     diagnostics: Diagnostics,
     cache: dict[Path, str | None],
@@ -454,20 +492,6 @@ def _validate_config_item(
         diagnostics,
     )
     _check_team_reviewers_shape(image_config.team_reviewers, location, diagnostics)
-
-    if image_config.update_mode == "commit":
-        reviewers = resolve_setting(image_config.reviewers, defaults.reviewers) or []
-        team_reviewers = (
-            resolve_setting(image_config.team_reviewers, defaults.team_reviewers) or []
-        )
-        if reviewers or team_reviewers:
-            diagnostics.warning(
-                "reviewers/team_reviewers are set but update_mode "
-                "resolves to 'commit'; only pull_request mode ever requests "
-                "reviewers, so these are never used",
-                location=location.location,
-                line=location.line,
-            )
 
     if image_config.environment_url is not None:
         _validate_template_value(
@@ -849,136 +873,6 @@ def _validate_template_value(
         except (KeyError, ValueError) as exc:
             diagnostics.error(
                 f"{value!r} failed to format with the real payload: {exc}",
-                location=location.location,
-                line=location.line,
-            )
-
-
-# --- Cross-config checks -----------------------------------------------------
-
-
-def _known_events() -> tuple[str, ...]:
-    """The event literals ``ImageConfig.events`` accepts, read off the schema.
-
-    Derived via ``get_args`` (rather than hardcoded) so this can't drift from
-    :class:`~odp_releaser.schemas.manifest_config.ImageConfig` if an event is
-    ever added or renamed there.
-    """
-    # pylint doesn't model pydantic's model_fields as a mapping.
-    annotation = ImageConfig.model_fields["events"].annotation  # pylint: disable=unsubscriptable-object
-    list_type = next(arg for arg in get_args(annotation) if arg is not NoneType)
-    (literal_type,) = get_args(list_type)
-    return get_args(literal_type)
-
-
-def _check_cross_config(
-    config_path: Path,
-    image_name: str,
-    image_configs: Sequence[ImageConfig],
-    defaults: ConfigDefaults,
-    location: ConfigLocation,
-    diagnostics: Diagnostics,
-) -> None:
-    """Checks that only make sense looking at a whole event's configs together.
-
-    ``bump_images`` groups configs by which ones match a given event (a
-    config with ``events: None`` matches every event) before resolving
-    settings or applying manifests, so these checks group the same way.
-    Distinct events can produce the exact same matching group (e.g. two
-    configs that both leave ``events`` unset match every event identically);
-    ``seen_groups`` collapses those so the same disagreement isn't reported
-    once per event.
-    """
-    seen_groups: set[frozenset[int]] = set()
-    for event in _known_events():
-        indices = frozenset(
-            index
-            for index, image_config in enumerate(image_configs)
-            if config_matches_event(image_config, event)
-        )
-        if not indices or indices in seen_groups:
-            continue
-        seen_groups.add(indices)
-        matching = [image_configs[index] for index in sorted(indices)]
-
-        _check_duplicate_manifest_targets(
-            config_path, image_name, event, matching, location, diagnostics
-        )
-        if len(matching) > 1:
-            _check_setting_agreement(
-                image_name, event, matching, defaults, location, diagnostics
-            )
-
-
-def _check_duplicate_manifest_targets(
-    config_path: Path,
-    image_name: str,
-    event: str,
-    matching: Sequence[ImageConfig],
-    location: ConfigLocation,
-    diagnostics: Diagnostics,
-) -> None:
-    """Warn when the same resolved manifest path is targeted more than once for one event."""
-    counts: dict[Path, int] = {}
-    for image_config in matching:
-        manifests: list[KustomizeManifest | HelmManifest | FileManifest] = [
-            *image_config.kustomize_manifests,
-            *image_config.helm_charts,
-            *image_config.file_manifests,
-        ]
-        for manifest in manifests:
-            resolved = resolve_manifest_path(config_path, manifest.path)
-            counts[resolved] = counts.get(resolved, 0) + 1
-
-    for resolved, count in counts.items():
-        if count > 1:
-            diagnostics.warning(
-                f"{resolved} is targeted {count} times by configs "
-                f"matching event {event!r} for image {image_name!r}; "
-                "bump-images will apply all of them, redundantly",
-                location=location.location,
-                line=location.line,
-            )
-
-
-def _check_setting_agreement(
-    image_name: str,
-    event: str,
-    matching: Sequence[ImageConfig],
-    defaults: ConfigDefaults,
-    location: ConfigLocation,
-    diagnostics: Diagnostics,
-) -> None:
-    """Warn when matching configs disagree on a setting ``bump_images`` resolves once.
-
-    ``bump_images`` warns and silently uses the first config's value when
-    matching configs disagree on ``update_mode`` or a ``resolve_setting``-ed
-    attribute; this reports the same disagreement ahead of time.
-    """
-    update_modes = {image_config.update_mode for image_config in matching}
-    if len(update_modes) > 1:
-        diagnostics.warning(
-            f"configs matching event {event!r} for image "
-            f"{image_name!r} disagree on update_mode ({sorted(update_modes)}); "
-            "bump-images warns and uses the first",
-            location=location.location,
-            line=location.line,
-        )
-
-    for attr in _AGREEMENT_ATTRS:
-        values = [
-            resolve_setting(getattr(image_config, attr), getattr(defaults, attr))
-            for image_config in matching
-        ]
-        present = [value for value in values if value is not None]
-        distinct = [
-            value for i, value in enumerate(present) if value not in present[:i]
-        ]
-        if len(distinct) > 1:
-            diagnostics.warning(
-                f"configs matching event {event!r} for image "
-                f"{image_name!r} disagree on {attr} ({distinct}); "
-                "bump-images warns and uses the first",
                 location=location.location,
                 line=location.line,
             )
