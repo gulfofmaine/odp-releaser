@@ -175,7 +175,7 @@ def test_generated_example_config_has_zero_diagnostics() -> None:
 
 
 def test_e2e_manifest_has_zero_diagnostics() -> None:
-    data = _round_trip_load(E2E_MANIFEST.read_text())
+    data = _round_trip_load(E2E_MANIFEST.read_text(encoding="utf-8"))
     diagnostics = Diagnostics(E2E_MANIFEST)
 
     report_unknown_keys(ManifestConfig, data, diagnostics)

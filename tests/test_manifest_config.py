@@ -101,7 +101,9 @@ def test_model_validate_emits_no_info_from_foreign_loggers(
     variables." per nested model during ``model_validate``; the pydantic
     rewrite should be silent.
     """
-    config_text = (MANIFESTS_DIR / "push" / "image_manifest.yaml").read_text()
+    config_text = (MANIFESTS_DIR / "push" / "image_manifest.yaml").read_text(
+        encoding="utf-8"
+    )
     data = _load_yaml(config_text)
 
     with caplog.at_level(logging.INFO):

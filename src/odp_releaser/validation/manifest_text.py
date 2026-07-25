@@ -60,7 +60,7 @@ def load_manifest_text(
 
     text: str | None
     try:
-        text = resolved.read_text()
+        text = resolved.read_text(encoding="utf-8")
         open_for_editing(text)
     except (OSError, ManifestLoadError, YAMLError) as exc:
         diagnostics.error(

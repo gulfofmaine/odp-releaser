@@ -133,7 +133,7 @@ def load_targets(targets_path: Path) -> list[DeployTarget]:
     if not targets_path.exists():
         raise MissingDeployTargetsError(targets_path)
 
-    content = targets_path.read_text().strip()
+    content = targets_path.read_text(encoding="utf-8").strip()
     if not content:
         raise EmptyDeployTargetsError(targets_path)
 

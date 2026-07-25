@@ -62,7 +62,7 @@ def test_dagster_tag_path_is_built_from_deployment_path() -> None:
 
 
 def test_dagster_user_code_updates_matching_tag_and_preserves_rest() -> None:
-    values_text = FIXTURE.read_text()
+    values_text = FIXTURE.read_text(encoding="utf-8")
     manifest = HelmManifest.model_validate(
         {"path": "./values.yaml", "dagster_user_code": True}
     )
@@ -92,7 +92,7 @@ def test_dagster_user_code_updates_matching_tag_and_preserves_rest() -> None:
 def test_non_matching_image_warns_and_leaves_file_unchanged(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    values_text = FIXTURE.read_text()
+    values_text = FIXTURE.read_text(encoding="utf-8")
     manifest = HelmManifest.model_validate(
         {"path": "./values.yaml", "dagster_user_code": True}
     )
@@ -112,7 +112,7 @@ def test_non_matching_image_warns_and_leaves_file_unchanged(
 
 
 def test_set_templates_apply_to_values_file() -> None:
-    values_text = FIXTURE.read_text()
+    values_text = FIXTURE.read_text(encoding="utf-8")
     manifest = HelmManifest.model_validate(
         {
             "path": "./values.yaml",

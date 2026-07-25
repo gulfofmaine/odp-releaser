@@ -54,14 +54,14 @@ _CLI_ARGS: dict[str, list[str]] = {
 
 
 def _load_yaml(path: Path) -> object:
-    return YAML(typ="safe").load(path.read_text())
+    return YAML(typ="safe").load(path.read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize("name", sorted(_SCHEMAS))
 def test_committed_schema_matches_generator(name: str) -> None:
     path, generator, command = _SCHEMAS[name]
     expected = json.dumps(generator(), indent=2) + "\n"
-    actual = path.read_text()
+    actual = path.read_text(encoding="utf-8")
     relative = path.relative_to(REPO_ROOT)
     assert actual == expected, (
         f"{relative} is stale; regenerate it with:\n  {command} > {relative}"

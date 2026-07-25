@@ -34,7 +34,9 @@ COMMON_KWARGS = {
 
 
 def test_build_payload_push_with_pr() -> None:
-    pr = parse_pr_merge((EVENT_DATA / "pr_push" / "pr-merge.json").read_text())
+    pr = parse_pr_merge(
+        (EVENT_DATA / "pr_push" / "pr-merge.json").read_text(encoding="utf-8")
+    )
     assert pr is not None
 
     payload = build_payload(
@@ -114,7 +116,9 @@ def test_build_payload_push_without_pr() -> None:
 
 
 def test_build_payload_release() -> None:
-    event_data = json.loads((EVENT_DATA / "release" / "event.json").read_text())
+    event_data = json.loads(
+        (EVENT_DATA / "release" / "event.json").read_text(encoding="utf-8")
+    )
 
     payload = build_payload(
         **COMMON_KWARGS,
@@ -159,7 +163,7 @@ def test_build_payload_release() -> None:
 
 def test_build_payload_workflow_dispatch() -> None:
     event_data = json.loads(
-        (EVENT_DATA / "workflow_dispatch" / "event.json").read_text()
+        (EVENT_DATA / "workflow_dispatch" / "event.json").read_text(encoding="utf-8")
     )
 
     payload = build_payload(
@@ -410,7 +414,9 @@ def test_make_payload_cli_push_without_token_warns(
 
 def test_make_payload_cli_release(tmp_path: Path) -> None:
     event_path = tmp_path / "event.json"
-    event_path.write_text((EVENT_DATA / "release" / "event.json").read_text())
+    event_path.write_text(
+        (EVENT_DATA / "release" / "event.json").read_text(encoding="utf-8")
+    )
 
     runner = typer.testing.CliRunner()
     result = runner.invoke(
@@ -480,6 +486,6 @@ def test_make_payload_cli_rejects_malformed_digest(tmp_path: Path) -> None:
     "example_name", ["push.json", "release.json", "workflow_dispatch.json"]
 )
 def test_client_payload_examples_still_validate(example_name: str) -> None:
-    text = (CLIENT_PAYLOAD_EXAMPLES / example_name).read_text()
+    text = (CLIENT_PAYLOAD_EXAMPLES / example_name).read_text(encoding="utf-8")
     payload = ClientPayload.model_validate_json(text)
     assert payload.source.event in {"push", "release", "workflow_dispatch"}

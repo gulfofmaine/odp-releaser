@@ -167,7 +167,7 @@ def validate_image_manifest(
     diagnostics = Diagnostics(config_path)
 
     try:
-        raw_config = config_path.read_text()
+        raw_config = config_path.read_text(encoding="utf-8")
     except OSError as exc:
         diagnostics.error(f"Could not read {config_path}: {exc}")
         return diagnostics

@@ -116,7 +116,7 @@ def _load_raw_items(targets_path: Path) -> list[object] | None:
     it just means every diagnostic below falls back to no line number.
     """
     try:
-        raw = YAML().load(targets_path.read_text())
+        raw = YAML().load(targets_path.read_text(encoding="utf-8"))
     except (OSError, YAMLError):
         return None
     if not isinstance(raw, list):

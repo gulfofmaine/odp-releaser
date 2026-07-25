@@ -299,7 +299,10 @@ def test_validator_verdict_matches_runtime_behavior(
         # that happened not to raise. Every clean corpus entry above targets
         # a manifest whose current on-disk value differs from the canned
         # payload's, so a real bump always changes something.
-        outputs = _parse_github_output(output_path.read_text())
+        # GITHUB_OUTPUT is written as UTF-8 (github_output.py), and a payload
+        # can carry non-ASCII (the release fixture's title has an em dash), so
+        # never read it with the platform's locale encoding.
+        outputs = _parse_github_output(output_path.read_text(encoding="utf-8"))
         assert outputs["changed"] == "true", (
             f"{case.case_id}: validator was clean but bump_images reported "
             "no change -- the engines may not have run to completion"

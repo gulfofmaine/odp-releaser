@@ -85,7 +85,7 @@ def test_e2e_fixture_chain(
         dry_run=True,
     )
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     sanitized = image_name.replace("/", "-")
     assert outputs["changed"] == "true"
     assert outputs["update_mode"] == update_mode

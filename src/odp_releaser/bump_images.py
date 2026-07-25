@@ -56,7 +56,7 @@ def _apply_manifest[ManifestT: _HasPath](
     """
     manifest_path = resolve_manifest_path(config_path, manifest.path)
     display_path = display_manifest_path(manifest_path)
-    original_manifest = manifest_path.read_text()
+    original_manifest = manifest_path.read_text(encoding="utf-8")
     manifest_messages: list[str] = []
     updated_manifest = update_fn(
         display_path, original_manifest, manifest, payload, manifest_messages
@@ -76,7 +76,7 @@ def _apply_manifest[ManifestT: _HasPath](
     logger.info(f"Diff for {manifest_path}:\n{'\n'.join(diff)}")
 
     if not dry_run:
-        manifest_path.write_text(updated_manifest)
+        manifest_path.write_text(updated_manifest, encoding="utf-8")
         logger.warning(f"Wrote updated manifest for {manifest_path}")
     else:
         logger.warning(f"Dry run, not writing updated manifest for {manifest_path}")
@@ -118,7 +118,7 @@ def bump_images(
     logger.debug(payload)
 
     logger.debug("Raw config:")
-    raw_config = config_path.read_text()  # pylint: disable=unspecified-encoding
+    raw_config = config_path.read_text(encoding="utf-8")
     logger.debug(raw_config)
 
     yaml = ruamel.yaml.YAML(typ="safe", pure=True)

@@ -17,7 +17,7 @@ EVENT_DATA = Path(__file__).parent / "event_data"
 
 
 def test_pr_push_pr_merge() -> None:
-    text = (EVENT_DATA / "pr_push" / "pr-merge.json").read_text()
+    text = (EVENT_DATA / "pr_push" / "pr-merge.json").read_text(encoding="utf-8")
     pr_merge = parse_pr_merge(text)
 
     assert pr_merge is not None
@@ -31,7 +31,7 @@ def test_pr_push_pr_merge() -> None:
 
 
 def test_push_pr_merge_pr_merge() -> None:
-    text = (EVENT_DATA / "push_pr_merge" / "pr-merge.json").read_text()
+    text = (EVENT_DATA / "push_pr_merge" / "pr-merge.json").read_text(encoding="utf-8")
     pr_merge = parse_pr_merge(text)
 
     assert pr_merge is not None
@@ -50,7 +50,7 @@ def test_parse_pr_merge_empty(text: str) -> None:
 
 
 def test_pr_push_event() -> None:
-    text = (EVENT_DATA / "pr_push" / "event.json").read_text()
+    text = (EVENT_DATA / "pr_push" / "event.json").read_text(encoding="utf-8")
     push_event = PushEvent.model_validate_json(text)
 
     assert push_event.model_dump() == snapshot(
@@ -66,7 +66,7 @@ def test_pr_push_event() -> None:
 
 
 def test_push_pr_merge_event() -> None:
-    text = (EVENT_DATA / "push_pr_merge" / "event.json").read_text()
+    text = (EVENT_DATA / "push_pr_merge" / "event.json").read_text(encoding="utf-8")
     push_event = PushEvent.model_validate_json(text)
 
     assert push_event.model_dump() == snapshot(
@@ -82,7 +82,7 @@ def test_push_pr_merge_event() -> None:
 
 
 def test_release_event() -> None:
-    text = (EVENT_DATA / "release" / "event.json").read_text()
+    text = (EVENT_DATA / "release" / "event.json").read_text(encoding="utf-8")
     release_event = ReleaseEvent.model_validate_json(text)
 
     assert release_event.model_dump() == snapshot(
@@ -98,7 +98,7 @@ def test_release_event() -> None:
 
 
 def test_workflow_dispatch_event() -> None:
-    text = (EVENT_DATA / "workflow_dispatch" / "event.json").read_text()
+    text = (EVENT_DATA / "workflow_dispatch" / "event.json").read_text(encoding="utf-8")
     workflow_dispatch_event = WorkflowDispatchEvent.model_validate_json(text)
 
     assert workflow_dispatch_event.model_dump() == snapshot(
