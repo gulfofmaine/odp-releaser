@@ -14,6 +14,26 @@ from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import HelmManifest
 
 
+def dagster_deployment_path(image_name: str) -> str:
+    """The yamlpath selector for a dagster user-deployments entry, by repository.
+
+    Exported so the config validator's "no matching deployment" check looks
+    at the exact same entry this engine matches against; a hand-respelled
+    copy could drift from what actually gets written.
+    """
+    return f'/deployments[image.repository="{image_name}"]'
+
+
+def dagster_tag_path(image_name: str) -> str:
+    """The yamlpath selector for the ``image.tag`` leaf under a deployment entry.
+
+    Defined in terms of :func:`dagster_deployment_path` so the entry
+    selector and the leaf this engine actually writes can't diverge if one
+    is edited without the other.
+    """
+    return f"{dagster_deployment_path(image_name)}/image/tag"
+
+
 def update_helm_values_with_payload(
     values_path: Path,
     values_text: str,
@@ -43,7 +63,7 @@ def update_helm_values_with_payload(
     apply_set_templates(processor, manifest.set, payload, helm_message)
 
     if manifest.dagster_user_code:
-        tag_path = f'/deployments[image.repository="{payload.image_name}"]/image/tag'
+        tag_path = dagster_tag_path(payload.image_name)
         matches = list(processor.get_nodes(tag_path, mustexist=False))
         if matches:
             message = set_value(

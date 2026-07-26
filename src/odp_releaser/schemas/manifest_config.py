@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from odp_releaser.schemas.example_yaml import example_yaml
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from pydantic import GetJsonSchemaHandler
+    from pydantic.json_schema import JsonSchemaValue
+    from pydantic_core import CoreSchema
 
 SET_DESCRIPTION = (
     "Mapping of yamlpath expressions to templated values. "
@@ -44,6 +51,34 @@ class KustomizeManifest(BaseModel):
         if isinstance(value, (str, Path)):
             return {"path": value}
         return value
+
+    @classmethod
+    # pylint sees BaseModel's hook as taking no arguments, so an override with
+    # pydantic's documented signature reads as arguments-differ.
+    def __get_pydantic_json_schema__(  # pylint: disable=arguments-differ
+        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        """Also accept the bare-path shorthand ``coerce_path_string`` allows.
+
+        ``model_json_schema()`` only sees the mapping form, so the generated
+        schema in ``schemas/`` (used for editor completion and
+        ``check-jsonschema``) would flag the documented
+        ``- ./kustomization.yaml`` shorthand as an error. Declaring the union
+        here keeps the published schema honest about what the model really
+        validates.
+        """
+        return {
+            "anyOf": [
+                handler(core_schema),
+                {
+                    "type": "string",
+                    "description": (
+                        "Relative path to the Kustomize manifest, shorthand "
+                        "for a mapping with only `path` set"
+                    ),
+                },
+            ]
+        }
 
 
 class HelmManifest(BaseModel):
@@ -274,6 +309,48 @@ class ConfigDefaults(BaseModel):
             ),
         ),
     ] = None
+
+
+def resolve_setting[SettingT](
+    config_value: SettingT | None, default: SettingT | None
+) -> SettingT | None:
+    """A config's own value, falling back to the defaults-level value.
+
+    Only an unset (``None``) config value inherits the default — an explicit
+    empty value (``[]``, ``""``) replaces it. Shared by ``bump_images`` (to
+    resolve the settings it actually applies) and the config validator (to
+    resolve the same settings when checking configs for agreement), so the
+    two can't drift
+    on what "resolved" means. It lives here rather than in ``bump_images``
+    so the validator can import it without importing ``bump_images`` itself
+    (which imports the validator in a later step).
+    """
+    return config_value if config_value is not None else default
+
+
+def config_matches_event(image_config: ImageConfig, event: str) -> bool:
+    """Whether ``image_config`` applies to ``event``.
+
+    An ``events: None`` config matches every event; otherwise ``event`` must
+    be explicitly listed. This is the exact filter ``bump_images`` applies to
+    an image's configs, before resolving any setting or applying any
+    manifest, so the validator must use this same predicate rather than
+    re-spell it -- otherwise a future change to the event-matching rule could
+    land on one side only, leaving the validator checking a different set of
+    configs than the ones a real run would apply.
+    """
+    return image_config.events is None or event in image_config.events
+
+
+def configs_for_event(
+    image_configs: Iterable[ImageConfig], event: str
+) -> list[ImageConfig]:
+    """The configs in ``image_configs`` that match ``event``, in config order."""
+    return [
+        image_config
+        for image_config in image_configs
+        if config_matches_event(image_config, event)
+    ]
 
 
 class ManifestConfig(BaseModel):

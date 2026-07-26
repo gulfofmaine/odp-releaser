@@ -38,11 +38,17 @@ def _parse_github_output(text: str) -> dict[str, str]:
     return result
 
 
-def test_missmatched_sha_format_error():
+def test_missmatched_sha_format_error(capsys: pytest.CaptureFixture[str]) -> None:
+    """A bad placeholder is caught by the pre-flight, not mid-write.
+
+    This config's `set` value uses `{sha}` instead of `{git_sha}`, which used
+    to raise a bare `KeyError` out of `str.format` after earlier manifests had
+    already been written.
+    """
     client_payload = load_client_payload(EventType.push)
     set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
 
-    with pytest.raises(KeyError):
+    with pytest.raises(typer.Exit) as excinfo:
         bump_images(
             config_path=Path(__file__).parent
             / "manifests"
@@ -51,6 +57,11 @@ def test_missmatched_sha_format_error():
             client_payload=client_payload.model_dump_json(),
             dry_run=True,
         )
+
+    assert excinfo.value.exit_code == 1
+    stderr = capsys.readouterr().err
+    assert "{sha}" in stderr
+    assert "no manifests were written" in stderr
 
 
 def test_success_path_writes_github_output(
@@ -68,7 +79,7 @@ def test_success_path_writes_github_output(
         dry_run=True,
     )
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "true"
     assert outputs["image_name"] == "gmri/neracoos-mariners-dashboard"
     assert outputs["digest"] == client_payload.digest
@@ -119,7 +130,7 @@ def test_dagster_helm_and_kustomize_dry_run(
         dry_run=True,
     )
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "true"
 
     commit_message = outputs["commit_message"]
@@ -169,7 +180,7 @@ images:
         dry_run=True,
     )
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     # Only the push config matches; its own values beat the top-level ones,
     # and the URL is templated with the payload's values.
     assert outputs["environment"] == "production"
@@ -206,7 +217,7 @@ images:
         dry_run=True,
     )
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["environment"] == "staging"
     assert outputs["environment_url"] == ""
 
@@ -240,7 +251,7 @@ images:
             dry_run=True,
         )
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["environment"] == "production"
     assert any(
         "Mixed environment values" in record.message for record in caplog.records
@@ -292,7 +303,7 @@ def test_image_present_with_empty_config_list_is_a_noop(
         dry_run=True,
     )
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "false"
     assert outputs["image_name"] == "gmri/neracoos-mariners-dashboard"
     assert outputs["digest"] == client_payload.digest
@@ -362,7 +373,7 @@ images:
 
     _run_bump(config_path, _payload_for())
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "false"
 
 
@@ -389,7 +400,7 @@ images:
     )
 
     _run_bump(config_path, _payload_for())
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "false"
 
     # And the converse: the default allows, but the config's own empty
@@ -462,7 +473,7 @@ images:
     with caplog.at_level(logging.WARNING, logger="odp-releaser"):
         _run_bump(config_path, _payload_for())
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     # Only the open config applies; the restricted one is skipped with a
     # warning rather than failing the run.
     assert outputs["environment"] == "dev"
@@ -491,7 +502,7 @@ images:
 
     _run_bump(config_path, client_payload)
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "false"
 
 
@@ -539,7 +550,7 @@ def test_allowed_actors_team_member_is_allowed(
     client_payload = _payload_for()
     _run_bump(config_path, client_payload)
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "false"
     # The membership check ran with the source org's reporter-app token.
     assert calls == [("acme", "deployers", client_payload.source.actor, "tok-acme")]
@@ -656,7 +667,7 @@ images:
 
     _run_bump(config_path, client_payload)
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "false"
 
 
@@ -680,7 +691,7 @@ images:
 
     _run_bump(config_path, _payload_for())
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["reviewers"] == "alice,bob"
     assert outputs["team_reviewers"] == "deployers"
 
@@ -707,7 +718,7 @@ images:
 
     _run_bump(config_path, _payload_for())
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["reviewers"] == "carol"
     # The config's explicit empty list replaces the default, not falls
     # back to it.
@@ -738,7 +749,7 @@ images:
     with caplog.at_level(logging.WARNING, logger="odp-releaser"):
         _run_bump(config_path, _payload_for())
 
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["reviewers"] == "alice"
     assert any(
         "Mixed reviewers values" in record.getMessage() for record in caplog.records
@@ -774,7 +785,7 @@ def test_mixed_update_mode_warns_and_prefers_pull_request(
         )
 
     assert any("Mixed update_mode" in record.getMessage() for record in caplog.records)
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["update_mode"] == "pull_request"
     assert outputs["changed"] == "false"
 
@@ -798,7 +809,7 @@ def test_test_bump_images_command_with_flags(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "true"
 
 
@@ -835,7 +846,7 @@ def test_test_bump_images_prompts_for_missing_values(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "configured images" in result.output
     assert "gmri/neracoos-mariners-dashboard" in result.output
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "true"
 
 
@@ -862,7 +873,7 @@ def test_bump_images_payload_positional_arg(
     )
 
     assert result.exit_code == 0, result.output
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "true"
 
 
@@ -892,7 +903,7 @@ def test_bump_images_no_change_omits_commit_message_entries(
     )
 
     assert result.exit_code == 0, result.output
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "false"
     assert "Updated" not in outputs["commit_message"]
 
@@ -920,5 +931,186 @@ def test_bump_images_env_only_invocation(
     )
 
     assert result.exit_code == 0, result.output
-    outputs = _parse_github_output(output.read_text())
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
     assert outputs["changed"] == "true"
+
+
+def test_preflight_writes_nothing_when_a_later_manifest_is_broken(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The whole bump is refused, so no manifest is left half-applied.
+
+    Without the pre-flight, the first manifest was written and only then did
+    reading the second one raise, leaving the repo in a state no commit
+    accounted for.
+    """
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    first = tmp_path / "first.kustomization.yaml"
+    original = """\
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+  - name: gmri/neracoos-mariners-dashboard
+    newTag: "old-tag"
+"""
+    first.write_text(original)
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      kustomize_manifests:
+        - ./first.kustomization.yaml
+        - ./does-not-exist.kustomization.yaml
+"""
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        bump_images(
+            config_path=config_path,
+            client_payload=_payload_for().model_dump_json(),
+            dry_run=False,
+        )
+
+    assert excinfo.value.exit_code == 1
+    assert first.read_text() == original
+    assert "does-not-exist.kustomization.yaml" in capsys.readouterr().err
+
+
+def test_preflight_warnings_do_not_block_a_bump(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A config that works but looks odd still bumps; only `validate --strict` blocks."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    manifest = tmp_path / "kustomization.yaml"
+    manifest.write_text(
+        """\
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+  - name: gmri/neracoos-mariners-dashboard
+    newTag: "old-tag"
+    digest: "sha256:0000"
+"""
+    )
+    config_path = tmp_path / "image_manifest.yaml"
+    # reviewers with update_mode: commit, and a kustomize entry carrying both
+    # newTag and digest: two warnings, no errors.
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      reviewers: [alice]
+      kustomize_manifests:
+        - ./kustomization.yaml
+"""
+    )
+
+    _run_bump(config_path, _payload_for())
+
+    assert _parse_github_output(output.read_text(encoding="utf-8"))["changed"] == "true"
+
+
+def test_non_ascii_manifest_round_trips_unmangled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A manifest's non-ASCII content survives a bump byte-for-byte.
+
+    Manifests are read and written as UTF-8 explicitly, not in the platform's
+    locale encoding: on a Windows runner (cp1252) an em dash in a comment or
+    label would otherwise fail the read outright, or be written back mangled —
+    silently corrupting a file the bump only meant to change one tag in.
+    """
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    manifest = tmp_path / "kustomization.yaml"
+    manifest.write_text(
+        """\
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Owner — Mariners' dashboard (en dash, curly quote, émoji: ✅)
+labels:
+  - pairs:
+      maintainer: "Renée"
+images:
+  - name: gmri/neracoos-mariners-dashboard
+    newTag: "old-tag"
+""",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      kustomize_manifests:
+        - ./kustomization.yaml
+""",
+        encoding="utf-8",
+    )
+
+    bump_images(
+        config_path=config_path,
+        client_payload=_payload_for().model_dump_json(),
+        dry_run=False,
+    )
+
+    updated = manifest.read_text(encoding="utf-8")
+    assert "Owner — Mariners' dashboard (en dash, curly quote, émoji: ✅)" in updated
+    assert 'maintainer: "Renée"' in updated
+    # The one thing that should have changed, did.
+    assert "old-tag" not in updated
+
+
+@pytest.mark.parametrize("newline", ["\r\n", "\n"], ids=["crlf", "lf"])
+def test_manifest_line_endings_survive_a_bump(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, newline: str
+) -> None:
+    """A bump changes one tag, not every line ending in the file.
+
+    The manifest engines emit `\\n`, so a CRLF manifest used to come back
+    entirely LF; and with the default `newline=None` on write, an LF manifest
+    became CRLF on Windows (`os.linesep`). Either way a one-tag bump produced
+    a whole-file diff.
+    """
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    manifest = tmp_path / "kustomization.yaml"
+    lines = [
+        "apiVersion: kustomize.config.k8s.io/v1beta1",
+        "kind: Kustomization",
+        "images:",
+        "  - name: gmri/neracoos-mariners-dashboard",
+        '    newTag: "old-tag"',
+        "",
+    ]
+    manifest.write_bytes(newline.join(lines).encode("utf-8"))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      kustomize_manifests: [./kustomization.yaml]
+""",
+        encoding="utf-8",
+    )
+
+    bump_images(
+        config_path=config_path,
+        client_payload=_payload_for().model_dump_json(),
+        dry_run=False,
+    )
+
+    written = manifest.read_bytes()
+    assert b"old-tag" not in written, "the bump should still have applied"
+    crlf = written.count(b"\r\n")
+    bare_lf = written.count(b"\n") - crlf
+    if newline == "\r\n":
+        assert (crlf, bare_lf) == (len(lines) - 1, 0)
+    else:
+        assert (crlf, bare_lf) == (0, len(lines) - 1)

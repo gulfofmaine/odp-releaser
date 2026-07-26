@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/gulfofmaine/odp-releaser/main/schemas/deploy_targets.schema.json",
+  "title": "odp-releaser deploy targets",
+  "description": "Configuration read by `odp-releaser notify`, listing the repos to send a `repository_dispatch` event to on release.",
+  "$defs": {
+    "DeployTarget": {
+      "description": "A repository that should send ``repository_dispatch`` event.",
+      "properties": {
+        "owner": {
+          "description": "Owner of the deploy repository",
+          "title": "Owner",
+          "type": "string"
+        },
+        "repo": {
+          "description": "Name of the deploy repository",
+          "title": "Repo",
+          "type": "string"
+        },
+        "event_type": {
+          "default": "image-published",
+          "description": "``repository_dispatch`` event type to send",
+          "title": "Event Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "repo"
+      ],
+      "title": "DeployTarget",
+      "type": "object",
+      "additionalProperties": false
+    }
+  },
+  "items": {
+    "$ref": "#/$defs/DeployTarget"
+  },
+  "type": "array"
+}

@@ -18,6 +18,12 @@ from odp_releaser.github_output import write_github_output, write_step_summary
 from odp_releaser.logger import logger
 from odp_releaser.manifests.file import update_file_with_payload
 from odp_releaser.manifests.helm import update_helm_values_with_payload
+from odp_releaser.manifests.helpers import (
+    display_manifest_path,
+    read_manifest_text,
+    resolve_manifest_path,
+    write_manifest_text,
+)
 from odp_releaser.manifests.kustomize import update_kustomize_with_payload
 from odp_releaser.report_metadata import ReportMetadata, embed_metadata
 from odp_releaser.schemas.client_payload import ClientPayload
@@ -25,7 +31,10 @@ from odp_releaser.schemas.manifest_config import (
     ConfigDefaults,
     ImageConfig,
     ManifestConfig,
+    configs_for_event,
+    resolve_setting,
 )
+from odp_releaser.validation.image_manifest import validate_image_configs
 
 DEFAULT_CONFIG_PATH = Path(".github/image_manifest.yaml")
 
@@ -50,14 +59,9 @@ def _apply_manifest[ManifestT: _HasPath](
     when the contents actually changed, so unchanged manifests don't show up
     in the audit trail.
     """
-    manifest_path = (config_path.parent / manifest.path).resolve()
-    try:
-        # Keep commit messages and logs readable (and stable across runners)
-        # by referring to manifests relative to the working directory.
-        display_path = manifest_path.relative_to(Path.cwd())
-    except ValueError:
-        display_path = manifest_path
-    original_manifest = manifest_path.read_text()
+    manifest_path = resolve_manifest_path(config_path, manifest.path)
+    display_path = display_manifest_path(manifest_path)
+    original_manifest, newline = read_manifest_text(manifest_path)
     manifest_messages: list[str] = []
     updated_manifest = update_fn(
         display_path, original_manifest, manifest, payload, manifest_messages
@@ -77,7 +81,7 @@ def _apply_manifest[ManifestT: _HasPath](
     logger.info(f"Diff for {manifest_path}:\n{'\n'.join(diff)}")
 
     if not dry_run:
-        manifest_path.write_text(updated_manifest)
+        write_manifest_text(manifest_path, updated_manifest, newline)
         logger.warning(f"Wrote updated manifest for {manifest_path}")
     else:
         logger.warning(f"Dry run, not writing updated manifest for {manifest_path}")
@@ -119,7 +123,7 @@ def bump_images(
     logger.debug(payload)
 
     logger.debug("Raw config:")
-    raw_config = config_path.read_text()  # pylint: disable=unspecified-encoding
+    raw_config = config_path.read_text(encoding="utf-8")
     logger.debug(raw_config)
 
     yaml = ruamel.yaml.YAML(typ="safe", pure=True)
@@ -160,12 +164,9 @@ def bump_images(
         logger.debug("Configs for the image:")
         logger.debug(image_configs)
 
-        filtered_configs: list[ImageConfig] = [
-            image_config
-            for image_config in image_configs
-            if image_config.events is None
-            or payload.source.event in image_config.events
-        ]
+        filtered_configs: list[ImageConfig] = configs_for_event(
+            image_configs, payload.source.event
+        )
 
         logger.debug("Filtered configs")
         logger.debug(filtered_configs)
@@ -184,6 +185,8 @@ def bump_images(
             logger.error(message)
             typer.echo(message, err=True)
             raise typer.Exit(1)
+
+        _preflight(config_path, payload, authorized_configs, config.defaults)
 
         update_modes = {image_config.update_mode for image_config in authorized_configs}
         if len(update_modes) > 1:
@@ -288,15 +291,51 @@ def bump_images(
     write_step_summary(f"# {'\n'.join(commit_message)}")
 
 
-def _resolve_setting[SettingT](
-    config_value: SettingT | None, default: SettingT | None
-) -> SettingT | None:
-    """A config's own value, falling back to the defaults-level value.
+def _preflight(
+    config_path: Path,
+    payload: ClientPayload,
+    authorized_configs: list[ImageConfig],
+    defaults: ConfigDefaults,
+) -> None:
+    """Validate the configs about to be applied, before writing any manifest.
 
-    Only an unset (``None``) config value inherits the default — an explicit
-    empty value (``[]``, ``""``) replaces it.
+    ``_apply_manifest`` writes each manifest as it goes, so a problem only the
+    third manifest has — a path that doesn't exist, a ``set`` selector that
+    doesn't resolve, a ``{sha}`` that should have been ``{git_sha}`` — used to
+    surface as a traceback *after* the first two were already written, leaving
+    a half-applied bump behind. Running the config validator over exactly the
+    configs this run selected turns that into one readable, complete list of
+    problems and a clean exit before anything changes on disk.
+
+    Warnings are logged rather than fatal: they describe configs that work but
+    probably don't do what their author meant, which is not a reason to fail a
+    release. ``odp-releaser validate image-manifest --strict`` is where those
+    are meant to block.
     """
-    return config_value if config_value is not None else default
+    diagnostics = validate_image_configs(
+        config_path,
+        payload.image_name,
+        authorized_configs,
+        defaults,
+        payload=payload,
+    )
+    for warning in diagnostics.warnings:
+        logger.warning(warning.render())
+    if not diagnostics.failed():
+        return
+
+    for error in diagnostics.errors:
+        logger.error(error.render())
+        typer.echo(error.render(), err=True)
+    message = (
+        f"{len(diagnostics.errors)} problem(s) in {config_path} would make "
+        f"this bump of '{payload.image_name}' fail part-way through; no "
+        "manifests were written. Run `odp-releaser validate image-manifest "
+        f"{config_path}` to check the whole config."
+    )
+    logger.error(message)
+    typer.echo(message, err=True)
+    raise typer.Exit(1)
 
 
 def _resolve_config_setting[SettingT](
@@ -315,7 +354,7 @@ def _resolve_config_setting[SettingT](
     values: list[SettingT] = [
         resolved
         for image_config in authorized_configs
-        if (resolved := _resolve_setting(getattr(image_config, attr), default))
+        if (resolved := resolve_setting(getattr(image_config, attr), default))
         is not None
     ]
     if not values:
@@ -343,7 +382,7 @@ def _config_authorizes(
     can still apply; ``team_checker`` caches GitHub team lookups across
     configs.
     """
-    allowed_repos = _resolve_setting(
+    allowed_repos = resolve_setting(
         image_config.allowed_source_repos, defaults.allowed_source_repos
     )
     if allowed_repos is not None and payload.repo not in allowed_repos:
@@ -353,7 +392,7 @@ def _config_authorizes(
         )
         return False
 
-    allowed_actors = _resolve_setting(
+    allowed_actors = resolve_setting(
         image_config.allowed_actors, defaults.allowed_actors
     )
     if allowed_actors is None:

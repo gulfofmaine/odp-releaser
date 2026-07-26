@@ -1,5 +1,6 @@
 from io import StringIO
 from pathlib import Path
+from typing import Literal
 
 from yamlpath.enums import YAMLValueFormats
 
@@ -12,6 +13,30 @@ from odp_releaser.manifests.helpers import (
 )
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import KustomizeManifest
+
+
+def image_entry_path(image_name: str) -> str:
+    """The yamlpath selector for a kustomize ``images:`` entry, by name.
+
+    Exported so the config validator checks the exact selector
+    ``update_kustomize_with_payload`` resolves against; a hand-respelled copy
+    in the validator could drift in quoting or structure and then pass or
+    fail nodes a real bump would not.
+    """
+    return f"""/images[name="{image_name}"]"""
+
+
+def image_pin_path(image_name: str, pin: Literal["tag", "digest"]) -> str:
+    """The yamlpath selector for the field ``pin`` writes on an images entry.
+
+    Takes the same ``"tag"``/``"digest"`` literal
+    :attr:`KustomizeManifest.pin` uses, so a new pin mode can't be wired into
+    this engine (``newTag``/``digest`` are the only two fields it knows how
+    to write) without this builder -- and the validator that shares it --
+    also being taught about it.
+    """
+    field = "digest" if pin == "digest" else "newTag"
+    return f"{image_entry_path(image_name)}/{field}"
 
 
 def update_kustomize_with_payload(
@@ -43,7 +68,7 @@ def update_kustomize_with_payload(
     commit_message.append(f"- Updated kustomize manifest at {kustomize_path}")
 
     if manifest.pin == "digest":
-        set_path = f"""/images[name="{payload.image_name}"]/digest"""
+        set_path = image_pin_path(payload.image_name, manifest.pin)
         message = set_value(
             processor,
             set_path,
@@ -52,7 +77,7 @@ def update_kustomize_with_payload(
             value_format=YAMLValueFormats.DQUOTE,
         )
     else:
-        set_path = f"""/images[name="{payload.image_name}"]/newTag"""
+        set_path = image_pin_path(payload.image_name, manifest.pin)
         message = set_value(
             processor,
             set_path,

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from yamlpath import Processor
 from yamlpath.common import Parsers
 from yamlpath.enums import YAMLValueFormats
@@ -12,6 +14,66 @@ yamlpath_logger = YamlPathLoggerAdapter(logger)
 
 class ManifestLoadError(Exception):
     """Raised when a manifest's YAML cannot be loaded."""
+
+
+def read_manifest_text(manifest_path: Path) -> tuple[str, str]:
+    """A manifest's text with ``\\n`` line endings, plus the endings it really uses.
+
+    Returned as a pair so a caller that writes the file back can restore what
+    was there. Reading is done with newline translation disabled so the
+    original convention is observable, then normalised to ``\\n`` because
+    that's what the manifest engines emit -- comparing their output against
+    an untranslated CRLF original would report every file as changed.
+
+    Without this, a bump rewrote every line of a CRLF manifest (the engines
+    emit ``\\n``), and on Windows the default ``newline=None`` on write turned
+    an LF manifest into CRLF -- either way a one-tag change became a
+    whole-file diff.
+    """
+    with manifest_path.open(encoding="utf-8", newline="") as handle:
+        raw = handle.read()
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    return raw.replace("\r\n", "\n"), newline
+
+
+def write_manifest_text(manifest_path: Path, text: str, newline: str) -> None:
+    """Write a manifest back with the line endings :func:`read_manifest_text` saw.
+
+    ``newline`` is always passed explicitly (never left as ``None``) so the
+    platform's ``os.linesep`` can't silently rewrite every line ending on
+    Windows.
+    """
+    manifest_path.write_text(text, encoding="utf-8", newline=newline)
+
+
+def resolve_manifest_path(config_path: Path, manifest_path: Path) -> Path:
+    """Resolve a manifest's ``path`` field against its config file's directory.
+
+    Paths inside an image manifest config are documented (on ``bump-images
+    --config-path``) as relative to the config file's own parent directory,
+    not the process's current working directory. ``bump_images`` (which
+    reads and writes the file) and the config validator (which checks it
+    ahead of time) both resolve every manifest path through this exact
+    function -- if the two ever resolved a path differently, the validator
+    would be checking a different file than the one ``bump_images`` actually
+    reads and writes, silently making its checks meaningless.
+    """
+    return (config_path.parent / manifest_path).resolve()
+
+
+def display_manifest_path(manifest_path: Path) -> Path:
+    """A resolved manifest path, shown relative to the cwd when possible.
+
+    Keeps commit messages and logs readable (and stable across CI runners
+    with different absolute checkout paths) by referring to manifests
+    relative to the working directory. Falls back to the resolved path
+    itself when it isn't under the cwd (e.g. a manifest path that escapes
+    the repository).
+    """
+    try:
+        return manifest_path.relative_to(Path.cwd())
+    except ValueError:
+        return manifest_path
 
 
 def open_for_editing(manifest_text: str) -> Processor:

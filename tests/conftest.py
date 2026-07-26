@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -29,3 +34,23 @@ def _clear_dispatch_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "REPORTER_APP_PRIVATE_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _default_github_output_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Point ``GITHUB_OUTPUT``/``GITHUB_STEP_SUMMARY`` at per-test temp files by default.
+
+    When the suite runs inside GitHub Actions (e.g. the ``checks`` job in
+    ``.github/workflows/ci.yml``), both env vars are already set to the real
+    job's output/summary files. A test that exercises
+    ``odp_releaser.github_output`` without setting its own value would
+    otherwise append to those real files, polluting the actual job's output.
+    Setting fixture-default values here -- before the test body runs -- makes
+    every test safe by default while still letting a test that calls
+    ``monkeypatch.setenv("GITHUB_OUTPUT", ...)`` itself win, since that call
+    happens later (during the test body) on the same ``monkeypatch`` object.
+    """
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github_output"))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "github_step_summary"))

@@ -51,7 +51,7 @@ def test_yaml_file_manifest_applies_set_templates() -> None:
     commit_message: list[str] = []
 
     result = update_file_with_payload(
-        path, path.read_text(), manifest, payload, commit_message
+        path, path.read_text(encoding="utf-8"), manifest, payload, commit_message
     )
 
     assert "image: gmri/example:7c8d9e0" in result
@@ -73,7 +73,7 @@ def test_json_file_manifest_stays_valid_json_with_stable_formatting() -> None:
     commit_message: list[str] = []
 
     result = update_file_with_payload(
-        path, path.read_text(), manifest, payload, commit_message
+        path, path.read_text(encoding="utf-8"), manifest, payload, commit_message
     )
 
     # Output must round-trip as JSON with the templated values applied.

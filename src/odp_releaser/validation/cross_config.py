@@ -1,0 +1,252 @@
+"""Checks that only make sense with every config matching an event visible at once.
+
+:mod:`odp_releaser.validation.image_manifest` checks each image config on its
+own, but a duplicate manifest target, an unused reviewer list, or a
+disagreeing setting isn't a property of any one config in isolation -- it's a
+collision or disagreement *between* sibling configs that ``bump_images``
+groups together by matching event before resolving settings or applying
+manifests. The checks here group the same way, so they can see what
+``bump_images`` itself sees. Split out of ``image_manifest`` purely to keep
+that module under the project's line-count budget; the two are one feature.
+"""
+
+from __future__ import annotations
+
+from types import NoneType
+from typing import TYPE_CHECKING, get_args
+
+from odp_releaser.manifests.helpers import resolve_manifest_path
+from odp_releaser.schemas.manifest_config import (
+    ImageConfig,
+    config_matches_event,
+    resolve_setting,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+    from odp_releaser.schemas.manifest_config import (
+        ConfigDefaults,
+        FileManifest,
+        HelmManifest,
+        KustomizeManifest,
+    )
+    from odp_releaser.validation.diagnostics import Diagnostics
+    from odp_releaser.validation.image_manifest import ConfigLocation
+
+# The settings ``bump_images`` resolves per matching config (falling back to
+# `defaults` via `resolve_setting`) and warns about when matching configs for
+# one event disagree; kept as a tuple (not hardcoded per-call) so the
+# agreement check covers exactly the same set `bump_images` itself resolves.
+_AGREEMENT_ATTRS = ("environment", "environment_url", "reviewers", "team_reviewers")
+
+
+def _known_events() -> tuple[str, ...]:
+    """The event literals ``ImageConfig.events`` accepts, read off the schema.
+
+    Derived via ``get_args`` (rather than hardcoded) so this can't drift from
+    :class:`~odp_releaser.schemas.manifest_config.ImageConfig` if an event is
+    ever added or renamed there.
+    """
+    # pylint doesn't model pydantic's model_fields as a mapping.
+    annotation = ImageConfig.model_fields["events"].annotation  # pylint: disable=unsubscriptable-object
+    list_type = next(arg for arg in get_args(annotation) if arg is not NoneType)
+    (literal_type,) = get_args(list_type)
+    return get_args(literal_type)
+
+
+def check_cross_config(
+    config_path: Path,
+    image_name: str,
+    image_configs: Sequence[ImageConfig],
+    defaults: ConfigDefaults,
+    location: ConfigLocation,
+    diagnostics: Diagnostics,
+) -> None:
+    """Checks that only make sense looking at a whole event's configs together.
+
+    ``bump_images`` groups configs by which ones match a given event (a
+    config with ``events: None`` matches every event) before resolving
+    settings or applying manifests, so these checks group the same way.
+    Distinct events can produce the exact same matching group (e.g. two
+    configs that both leave ``events`` unset match every event identically);
+    ``seen_groups`` collapses those so the same disagreement isn't reported
+    once per event.
+    """
+    seen_groups: set[frozenset[int]] = set()
+    for event in _known_events():
+        indices = frozenset(
+            index
+            for index, image_config in enumerate(image_configs)
+            if config_matches_event(image_config, event)
+        )
+        if not indices or indices in seen_groups:
+            continue
+        seen_groups.add(indices)
+        matching = [image_configs[index] for index in sorted(indices)]
+
+        _check_duplicate_manifest_targets(
+            config_path, image_name, event, matching, location, diagnostics
+        )
+        _check_unused_reviewers(
+            image_name, event, matching, defaults, location, diagnostics
+        )
+        if len(matching) > 1:
+            _check_setting_agreement(
+                image_name, event, matching, defaults, location, diagnostics
+            )
+
+
+def _check_duplicate_manifest_targets(
+    config_path: Path,
+    image_name: str,
+    event: str,
+    matching: Sequence[ImageConfig],
+    location: ConfigLocation,
+    diagnostics: Diagnostics,
+) -> None:
+    """Warn when the same resolved manifest path is targeted more than once for one event."""
+    counts: dict[Path, int] = {}
+    for image_config in matching:
+        manifests: list[KustomizeManifest | HelmManifest | FileManifest] = [
+            *image_config.kustomize_manifests,
+            *image_config.helm_charts,
+            *image_config.file_manifests,
+        ]
+        for manifest in manifests:
+            resolved = resolve_manifest_path(config_path, manifest.path)
+            counts[resolved] = counts.get(resolved, 0) + 1
+
+    for resolved, count in counts.items():
+        if count > 1:
+            diagnostics.warning(
+                f"{resolved} is targeted {count} times by configs "
+                f"matching event {event!r} for image {image_name!r}; "
+                "bump-images will apply all of them, redundantly",
+                location=location.location,
+                line=location.line,
+            )
+
+
+def _effective_update_mode(matching: Sequence[ImageConfig]) -> str:
+    """The ``update_mode`` matching configs would resolve to at bump time.
+
+    Mirrors ``bump_images.bump_images`` (~186-193): it collects
+    ``update_mode`` across every authorized config matching the event and
+    unconditionally prefers ``"pull_request"`` if *any* of them sets it,
+    regardless of config order -- unlike the ``resolve_setting``-based
+    attributes below, where the first config's value wins. Check this
+    against that runtime block if the two ever seem to disagree.
+    """
+    if any(image_config.update_mode == "pull_request" for image_config in matching):
+        return "pull_request"
+    return "commit"
+
+
+def _effective_setting[SettingT](
+    matching: Sequence[ImageConfig], default: SettingT | None, attr: str
+) -> SettingT | None:
+    """The value ``bump_images._resolve_config_setting`` would resolve ``attr`` to.
+
+    Mirrors that function (``bump_images.py`` ~336-363) exactly, minus its
+    logging: each matching config's own value falls back to ``default`` via
+    ``resolve_setting``, and the first config (in order) whose resolved
+    value is not ``None`` wins. Returns ``default`` itself when no matching
+    config resolves to a value at all.
+    """
+    values: list[SettingT] = [
+        resolved
+        for image_config in matching
+        if (resolved := resolve_setting(getattr(image_config, attr), default))
+        is not None
+    ]
+    return values[0] if values else default
+
+
+def _check_unused_reviewers(
+    image_name: str,
+    event: str,
+    matching: Sequence[ImageConfig],
+    defaults: ConfigDefaults,
+    location: ConfigLocation,
+    diagnostics: Diagnostics,
+) -> None:
+    """Warn when the group's *effective* settings mean reviewers go unused.
+
+    A single config's own ``update_mode`` isn't enough to know whether its
+    ``reviewers``/``team_reviewers`` are ever requested: ``bump_images``
+    resolves ``update_mode`` across every config matching an event before
+    applying any of them (see :func:`_effective_update_mode`), so a sibling
+    config that sets ``update_mode: pull_request`` for the same event forces
+    pull-request mode for this config too, even though this config alone
+    says ``commit``. This mirrors that same cross-config resolution -- both
+    for ``update_mode`` and for ``reviewers``/``team_reviewers`` (each via
+    :func:`_effective_setting`, mirroring
+    ``bump_images._resolve_config_setting``) -- so it only warns when
+    reviewers are configured but truly can never be requested for this
+    event, naming the event since a config can be ``commit`` for one event
+    and ``pull_request`` for another.
+    """
+    if _effective_update_mode(matching) != "commit":
+        return
+    reviewers = _effective_setting(matching, defaults.reviewers, "reviewers") or []
+    team_reviewers = (
+        _effective_setting(matching, defaults.team_reviewers, "team_reviewers") or []
+    )
+    if reviewers or team_reviewers:
+        diagnostics.warning(
+            f"reviewers/team_reviewers are set but update_mode resolves to "
+            f"'commit' for event {event!r} on image {image_name!r}; only "
+            "pull_request mode ever requests reviewers, so these are never "
+            "used",
+            location=location.location,
+            line=location.line,
+        )
+
+
+def _check_setting_agreement(
+    image_name: str,
+    event: str,
+    matching: Sequence[ImageConfig],
+    defaults: ConfigDefaults,
+    location: ConfigLocation,
+    diagnostics: Diagnostics,
+) -> None:
+    """Warn when matching configs disagree on a setting ``bump_images`` resolves once.
+
+    ``update_mode`` and the ``resolve_setting``-ed attributes are resolved
+    differently at runtime (see :func:`_effective_update_mode` and
+    :func:`_effective_setting`), so their disagreement messages must say
+    different things: ``update_mode`` always ends up ``pull_request`` if any
+    matching config sets it, while the other attributes keep the first
+    config's value.
+    """
+    update_modes = {image_config.update_mode for image_config in matching}
+    if len(update_modes) > 1:
+        diagnostics.warning(
+            f"configs matching event {event!r} for image "
+            f"{image_name!r} disagree on update_mode ({sorted(update_modes)}); "
+            "bump-images ignores config order for update_mode and uses "
+            "pull_request since at least one matching config sets it",
+            location=location.location,
+            line=location.line,
+        )
+
+    for attr in _AGREEMENT_ATTRS:
+        values = [
+            resolve_setting(getattr(image_config, attr), getattr(defaults, attr))
+            for image_config in matching
+        ]
+        present = [value for value in values if value is not None]
+        distinct = [
+            value for i, value in enumerate(present) if value not in present[:i]
+        ]
+        if len(distinct) > 1:
+            diagnostics.warning(
+                f"configs matching event {event!r} for image "
+                f"{image_name!r} disagree on {attr} ({distinct}); "
+                "bump-images warns and uses the first",
+                location=location.location,
+                line=location.line,
+            )

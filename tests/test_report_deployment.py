@@ -118,7 +118,7 @@ def test_report_deployment_commit_mode(tmp_path: Path, rsa_private_key: str) -> 
     assert status_body["log_url"] == (
         f"https://github.com/{DEPLOY_REPO}/actions/runs/{RUN_ID}"
     )
-    summary = (tmp_path / "summary").read_text()
+    summary = (tmp_path / "summary").read_text(encoding="utf-8")
     assert "success" in summary
     assert SOURCE_REPO in summary
 
@@ -286,7 +286,7 @@ def test_report_deployment_pr_body_without_metadata_is_a_noop(
 
     assert result.exit_code == 0, result.output
     assert "nothing to report" in result.output
-    summary = (tmp_path / "summary").read_text()
+    summary = (tmp_path / "summary").read_text(encoding="utf-8")
     assert "nothing to report" in summary
 
 
@@ -354,7 +354,7 @@ def test_report_deployment_missing_credentials_exits_nonzero(
     assert result.exit_code != 0
     output = result.output or result.stderr
     assert "No reporter app credentials" in output
-    summary = (tmp_path / "summary").read_text()
+    summary = (tmp_path / "summary").read_text(encoding="utf-8")
     assert "Failed to report deployment" in summary
 
 

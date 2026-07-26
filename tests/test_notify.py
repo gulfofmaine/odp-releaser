@@ -201,7 +201,7 @@ def test_notify_two_targets_succeed(tmp_path: Path, rsa_private_key: str) -> Non
     assert "acme/widgets" in summary_text
     assert "other/gadgets" in summary_text
 
-    outputs = _parse_github_output(github_output.read_text())
+    outputs = _parse_github_output(github_output.read_text(encoding="utf-8"))
     assert outputs["target_count"] == "2"
     assert json.loads(outputs["results"]) == [
         {
@@ -293,7 +293,7 @@ def test_notify_one_missing_credentials_still_dispatches_other(
     assert summary_text.count("| FAILED ") == 1
     assert "other/gadgets" in summary_text
 
-    outputs = _parse_github_output(github_output.read_text())
+    outputs = _parse_github_output(github_output.read_text(encoding="utf-8"))
     assert outputs["target_count"] == "2"
     results = json.loads(outputs["results"])
     assert [(entry["repo"], entry["ok"]) for entry in results] == [
@@ -340,7 +340,7 @@ def test_notify_dry_run_makes_no_http_calls(
     summary_text = summary.read_text()
     assert summary_text.count("| OK ") == 2
 
-    outputs = _parse_github_output(github_output.read_text())
+    outputs = _parse_github_output(github_output.read_text(encoding="utf-8"))
     assert outputs["target_count"] == "2"
     results = json.loads(outputs["results"])
     assert all(entry["ok"] for entry in results)

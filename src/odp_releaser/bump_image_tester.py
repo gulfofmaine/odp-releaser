@@ -125,8 +125,10 @@ def _image_names(config_path: Path) -> list[str] | None:
     of erroring before the real validation in `bump_images` runs.
     """
     try:
-        raw_config = config_path.read_text()
-    except OSError:
+        raw_config = config_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError subclasses ValueError, not OSError; without it a
+        # non-UTF-8 config turned this best-effort prompt hint into a crash.
         return None
 
     yaml = ruamel.yaml.YAML(typ="safe", pure=True)
@@ -152,7 +154,9 @@ def load_client_payload(event_type: EventType) -> ClientPayload:
     payload_path = CLIENT_PAYLOAD_DIR / f"{event_type.value}.json"
 
     logger.debug(f"Payload path: {payload_path}")
-    payload = ClientPayload.model_validate_json(payload_path.read_text())
+    payload = ClientPayload.model_validate_json(
+        payload_path.read_text(encoding="utf-8")
+    )
     logger.debug("Parsed client payload")
     logger.debug(payload)
     return payload

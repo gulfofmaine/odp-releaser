@@ -47,9 +47,11 @@ Changelog = "https://github.com/gulfofmaine/odp-releaser/releases"
 [dependency-groups]
 test = [
   "inline-snapshot>=0.34.2",
+  "jsonschema>=4.26.0",
   "pytest >=9",
   "pytest-cov >=7",
   "respx>=0.23.1",
+  "types-jsonschema>=4.26.0.20260518",
 ]
 dev = [
   { include-group = "test" },
@@ -86,6 +88,11 @@ report.exclude_also = [
 
 [tool.mypy]
 files = ["src", "tests"]
+# The pre-commit mypy hook runs in its own environment without the project
+# installed, and only on the files being committed -- so a commit touching
+# just tests/ leaves it unable to resolve `odp_releaser.*` at all. Pointing
+# mypy at the src layout fixes that without affecting a full run.
+mypy_path = ["src"]
 warn_unused_configs = true
 strict = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]

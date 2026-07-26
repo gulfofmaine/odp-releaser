@@ -172,7 +172,7 @@ def resolve_client_payload(
 
     event_data: dict[str, Any] = {}
     if github_event_name == RELEASE_EVENT:
-        event_data = json.loads(github_event_path.read_text())
+        event_data = json.loads(github_event_path.read_text(encoding="utf-8"))
 
     return build_payload(
         image_name=image_name,

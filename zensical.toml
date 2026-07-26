@@ -13,6 +13,7 @@ nav = [
     "actions.md",
     "github_apps.md",
     "cli.md",
+    "validation.md",
     { "Config" = [
         "config/deploy_targets.md",
         "config/image_manifest.md",
