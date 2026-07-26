@@ -17,6 +17,7 @@ from typing import Literal
 from githubkit import AppAuthStrategy, GitHub, TokenAuthStrategy
 from githubkit.exception import RequestFailed
 from githubkit.utils import UNSET
+from githubkit_schemas.latest.models import AppPermissions
 from pydantic import TypeAdapter, ValidationError
 
 from odp_releaser.logger import logger
@@ -34,6 +35,15 @@ REPORTER_APP_PRIVATE_KEY_ENV = "REPORTER_APP_PRIVATE_KEY"
 _APPS_ADAPTER = TypeAdapter(dict[str, DispatchAppCredentials])
 
 DEFAULT_TOKEN_PERMISSIONS: dict[str, str] = {"contents": "write"}
+
+# The permission names GitHub's app-permissions object accepts, read off
+# githubkit's model rather than restated. Worth checking against, because a
+# misspelled name is *silently dropped* on the way out — and a token request
+# with no permissions at all is granted every permission the installation
+# holds. `pull_requests` is a live trap here: the hyphenated `pull-requests`
+# spelling is what `actions/create-github-app-token`'s inputs use, so it reads
+# as correct.
+KNOWN_TOKEN_PERMISSIONS: frozenset[str] = frozenset(AppPermissions.model_fields)
 
 # GitHub caps deployment and deployment-status descriptions at 140 characters.
 DEPLOYMENT_DESCRIPTION_LIMIT = 140
@@ -118,6 +128,26 @@ class PermissionsNotGrantedError(Exception):
             "the existing installation — a newly requested permission stays "
             "inactive until the installation owner accepts it."
         )
+
+
+def _check_permissions(permissions: dict[str, str]) -> None:
+    """Reject permission names GitHub wouldn't recognize.
+
+    A misspelled name is dropped rather than rejected by the API, and a token
+    minted with an empty permissions object carries *every* permission the
+    installation has — so a typo silently over-grants instead of failing. This
+    turns that into a loud error before the request is made.
+    """
+    unknown = sorted(set(permissions) - KNOWN_TOKEN_PERMISSIONS)
+    if unknown:
+        msg = (
+            f"Unknown installation token permission(s): {', '.join(unknown)}. "
+            "GitHub silently ignores unrecognized names, and a token with no "
+            "permissions receives all of the installation's, so this is "
+            "rejected here. Names are snake_case (e.g. 'pull_requests', not "
+            "'pull-requests')."
+        )
+        raise ValueError(msg)
 
 
 def _resolve_credentials(
@@ -263,6 +293,7 @@ def installation_token_for(
     """
     if permissions is None:
         permissions = DEFAULT_TOKEN_PERMISSIONS
+    _check_permissions(permissions)
     with GitHub(AppAuthStrategy(creds.app_id, creds.private_key)) as github:
         try:
             installation = github.rest.apps.get_repo_installation(owner, repo)
@@ -312,6 +343,7 @@ def org_installation_token_for(
     the app itself has been granted them. Returns the token string. ``role``
     only labels error messages and logs.
     """
+    _check_permissions(permissions)
     with GitHub(AppAuthStrategy(creds.app_id, creds.private_key)) as github:
         try:
             installation = github.rest.apps.get_org_installation(org)

@@ -632,7 +632,7 @@ def test_installation_token_for_reports_ungranted_permissions(
 ) -> None:
     """GitHub 422s when a token asks for more than the app was granted.
 
-    Commenting needs `pull-requests: write`, which existing reporter-app
+    Commenting needs `pull_requests: write`, which existing reporter-app
     installations have not consented to yet, so this has to arrive as an
     actionable message rather than a bare RequestFailed.
     """
@@ -659,13 +659,29 @@ def test_installation_token_for_reports_ungranted_permissions(
                 creds,
                 "acme",
                 "widgets",
-                permissions={"pull-requests": "write"},
+                permissions={"pull_requests": "write"},
                 role="reporter",
             )
 
     message = str(excinfo.value)
-    assert "pull-requests" in message
+    assert "pull_requests" in message
     assert "acme/widgets" in message
     # Names the actual fix: the org has to accept the permission request.
     assert "accept" in message.lower()
-    assert excinfo.value.permissions == {"pull-requests": "write"}
+    assert excinfo.value.permissions == {"pull_requests": "write"}
+
+
+def test_installation_token_for_rejects_an_unknown_permission_name(
+    rsa_private_key: str,
+) -> None:
+    """GitHub drops an unrecognized permission name and then grants the token
+    every permission the installation has, so a typo must fail loudly here
+    instead of quietly over-granting."""
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with pytest.raises(ValueError, match="pull-requests") as excinfo:
+        installation_token_for(
+            creds, "acme", "widgets", permissions={"pull-requests": "write"}
+        )
+
+    assert "snake_case" in str(excinfo.value)
