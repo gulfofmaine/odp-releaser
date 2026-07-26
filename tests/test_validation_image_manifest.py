@@ -1194,3 +1194,273 @@ def test_non_utf8_config_file_is_reported_not_a_traceback(tmp_path: Path) -> Non
 
     assert diagnostics.failed() is True
     assert any("utf-8" in d.message.lower() for d in diagnostics.errors)
+
+
+# --- Comment templates --------------------------------------------------------
+
+
+def _kustomization(tmp_path: Path) -> None:
+    (tmp_path / "kustomization.yaml").write_text(
+        'images:\n  - name: gmri/app\n    newTag: "old"\n'
+    )
+
+
+def test_comment_template_unknown_placeholder_is_an_error(tmp_path: Path) -> None:
+    """Comment templates have their own vocabulary, so a `set`-only placeholder
+    like `{payload}` is just as wrong here as a typo."""
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      comment:
+        deployed: "shipped {nope} and {payload}"
+      kustomize_manifests: [./kustomization.yaml]
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.failed() is True
+    messages = " ".join(_messages(diagnostics))
+    assert "{nope}" in messages
+    assert "{payload}" in messages
+    # The error lists the comment vocabulary, not the `set` one.
+    assert "bump_url" in messages
+    assert 'images."gmri/app"[0].comment.deployed' in _locations(diagnostics)
+
+
+def test_comment_template_stray_brace_is_an_error(tmp_path: Path) -> None:
+    """Markdown containing a literal brace -- a Helm template in a fence, a
+    `${{ }}` expression -- must be doubled."""
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      comment:
+        deployed: "use `{{ .Values.image }`"
+      kustomize_manifests: [./kustomization.yaml]
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.failed() is True
+    assert any("not a valid format string" in m for m in _messages(diagnostics))
+
+
+def test_comment_template_with_doubled_braces_is_clean(tmp_path: Path) -> None:
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      comment:
+        deployed: "`{{{{ .Values.image }}}}` is now {new_tag}"
+      kustomize_manifests: [./kustomization.yaml]
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.diagnostics == ()
+
+
+def test_static_comment_template_is_not_warned_about(tmp_path: Path) -> None:
+    """Unlike a `set` value, a comment with no placeholders is legitimate."""
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      comment:
+        deployed: "a new image was deployed"
+      kustomize_manifests: [./kustomization.yaml]
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.diagnostics == ()
+
+
+def test_defaults_level_comment_template_is_validated(tmp_path: Path) -> None:
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+defaults:
+  comment:
+    deployed: "shipped {nope}"
+images:
+  gmri/app:
+    - events: [push]
+      kustomize_manifests: [./kustomization.yaml]
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.failed() is True
+    assert "defaults.comment.deployed" in _locations(diagnostics)
+
+
+def test_comment_configured_for_an_event_without_pull_requests_warns(
+    tmp_path: Path,
+) -> None:
+    """Only push payloads carry a source pull request, so a release-only config
+    can never post the comment it asks for."""
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [release]
+      comment:
+        deployed: "released {new_tag}"
+      kustomize_manifests:
+        - path: ./kustomization.yaml
+          set:
+            /images[0]/newTag: "{new_tag}"
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.failed() is False
+    assert any(
+        "never carries a source pull request" in d.message for d in diagnostics.warnings
+    )
+
+
+def test_inherited_default_comment_does_not_warn_on_a_release_config(
+    tmp_path: Path,
+) -> None:
+    """Commenting is on by default, so warning about the built-in templates
+    would fire on every release-only config in every existing manifest."""
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [release]
+      kustomize_manifests:
+        - path: ./kustomization.yaml
+          set:
+            /images[0]/newTag: "{new_tag}"
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.diagnostics == ()
+
+
+def test_explicit_staged_template_in_commit_mode_warns(tmp_path: Path) -> None:
+    """A direct commit is reported deployed immediately, so a staged template
+    someone wrote down is never reached."""
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      update_mode: commit
+      comment:
+        staged: "staging {new_tag}"
+      kustomize_manifests: [./kustomization.yaml]
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.failed() is False
+    assert any("comment.staged is set" in d.message for d in diagnostics.warnings)
+
+
+def test_explicit_staged_template_in_pull_request_mode_is_clean(
+    tmp_path: Path,
+) -> None:
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      update_mode: pull_request
+      comment:
+        staged: "staging {new_tag}"
+      kustomize_manifests: [./kustomization.yaml]
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.diagnostics == ()
+
+
+def test_disabled_comment_is_not_warned_about(tmp_path: Path) -> None:
+    """Switching comments off is an answer, not a problem to report."""
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [release]
+      comment:
+        enabled: false
+      kustomize_manifests:
+        - path: ./kustomization.yaml
+          set:
+            /images[0]/newTag: "{new_tag}"
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.diagnostics == ()
+
+
+def test_disagreeing_comment_settings_warn(tmp_path: Path) -> None:
+    """`comment` is resolved once across an event's configs, like environment,
+    so a disagreement has to be reported the same way."""
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      update_mode: pull_request
+      comment:
+        staged: "first {new_tag}"
+      kustomize_manifests: [./kustomization.yaml]
+    - events: [push]
+      comment:
+        staged: "second {new_tag}"
+      kustomize_manifests: [./other.kustomization.yaml]
+""",
+    )
+    (tmp_path / "other.kustomization.yaml").write_text(
+        'images:\n  - name: gmri/app\n    newTag: "old"\n'
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert any("disagree on comment" in d.message for d in diagnostics.warnings), (
+        _messages(diagnostics)
+    )

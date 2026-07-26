@@ -51,6 +51,7 @@ from ruamel.yaml.error import YAMLError
 from yamlpath import Processor, YAMLPath
 from yamlpath.exceptions import YAMLPathException
 
+from odp_releaser.comment_body import COMMENT_TEMPLATE_KEYS, synthesize_context
 from odp_releaser.manifests.file import update_file_with_payload
 from odp_releaser.manifests.helm import (
     dagster_deployment_path,
@@ -68,6 +69,7 @@ from odp_releaser.manifests.kustomize import (
 )
 from odp_releaser.schemas.manifest_config import (
     AllowedActors,
+    CommentConfig,
     ConfigDefaults,
     FileManifest,
     HelmManifest,
@@ -203,6 +205,7 @@ def validate_image_manifest(
     _check_team_reviewers_shape(
         config.defaults.team_reviewers, defaults_location, diagnostics
     )
+    _validate_comment_templates(config.defaults.comment, defaults_location, diagnostics)
     if config.defaults.environment_url is not None:
         _validate_template_value(
             config.defaults.environment_url,
@@ -492,6 +495,7 @@ def _validate_config_item(
         diagnostics,
     )
     _check_team_reviewers_shape(image_config.team_reviewers, location, diagnostics)
+    _validate_comment_templates(image_config.comment, location, diagnostics)
 
     if image_config.environment_url is not None:
         _validate_template_value(
@@ -790,6 +794,38 @@ def _validate_selector(
         )
 
 
+def _validate_comment_templates(
+    comment: CommentConfig | None,
+    location: ConfigLocation,
+    diagnostics: Diagnostics,
+) -> None:
+    """Both comment templates only use known, ``.format``-safe placeholders.
+
+    Comment templates have their own vocabulary (see
+    :mod:`odp_releaser.comment_body`) and are checked against a synthetic
+    context rather than the payload, since most of what a comment can reference
+    -- the deploy repo, the bump URL, the resolved environment -- isn't known
+    until the bump runs. ``warn_if_no_placeholder`` is off because a wholly
+    static comment is a legitimate thing to want.
+    """
+    if comment is None:
+        return
+    context_kwargs = synthesize_context().format_kwargs()
+    for field in ("staged", "deployed"):
+        template: str | None = getattr(comment, field)
+        if not template:
+            continue
+        _validate_template_value(
+            template,
+            location.child(f"comment.{field}"),
+            diagnostics,
+            None,
+            warn_if_no_placeholder=False,
+            valid_keys=COMMENT_TEMPLATE_KEYS,
+            format_kwargs=context_kwargs,
+        )
+
+
 def _validate_template_value(
     value: str,
     location: ConfigLocation,
@@ -797,6 +833,8 @@ def _validate_template_value(
     payload: ClientPayload | None,
     *,
     warn_if_no_placeholder: bool = True,
+    valid_keys: frozenset[str] = TEMPLATE_KEYS,
+    format_kwargs: dict[str, str] | None = None,
 ) -> None:
     """A templated value only uses known, ``.format``-safe placeholders.
 
@@ -808,12 +846,19 @@ def _validate_template_value(
     ``str.format`` would attempt it, but nothing in ``value_format_kwargs()``
     supports it usefully, so it's flagged rather than silently misbehaving),
     and a stray ``{``/``}`` (``ValueError`` from ``Formatter().parse``
-    itself). When a real ``payload`` is available and none of those static
-    checks already flagged the value, the actual
-    ``value.format(**payload.value_format_kwargs())`` call is attempted too,
-    so the check is faithful to a real ``bump-images`` run rather than only to
-    the placeholder names -- but a value already reported above isn't reported
-    a second time for failing the very call that was predicted to fail.
+    itself). When real format arguments are available and none of those static
+    checks already flagged the value, the actual ``value.format(**kwargs)``
+    call is attempted too, so the check is faithful to a real ``bump-images``
+    run rather than only to the placeholder names -- but a value already
+    reported above isn't reported a second time for failing the very call that
+    was predicted to fail.
+
+    ``valid_keys``/``format_kwargs`` default to the ``set``/
+    ``environment_url`` vocabulary (:data:`TEMPLATE_KEYS` and the payload's
+    own ``value_format_kwargs()``). Comment templates pass their own pair --
+    :data:`~odp_releaser.comment_body.COMMENT_TEMPLATE_KEYS` and a synthetic
+    context -- because a comment may reference deploy-side run facts that have
+    no business being templated into a manifest.
     """
     reported = False
     try:
@@ -847,11 +892,11 @@ def _validate_template_value(
                 location=location.location,
                 line=location.line,
             )
-        elif field_name not in TEMPLATE_KEYS:
-            valid_keys = ", ".join(sorted(TEMPLATE_KEYS))
+        elif field_name not in valid_keys:
+            known = ", ".join(sorted(valid_keys))
             diagnostics.error(
                 f"{value!r} references unknown placeholder "
-                f"'{{{field_name}}}'; valid placeholders are: {valid_keys}",
+                f"'{{{field_name}}}'; valid placeholders are: {known}",
                 location=location.location,
                 line=location.line,
             )
@@ -867,10 +912,12 @@ def _validate_template_value(
             line=location.line,
         )
 
-    if payload is not None and not reported:
+    if format_kwargs is None and payload is not None:
+        format_kwargs = payload.value_format_kwargs()
+    if format_kwargs is not None and not reported:
         try:
-            value.format(**payload.value_format_kwargs())
-        except (KeyError, ValueError) as exc:
+            value.format(**format_kwargs)
+        except (KeyError, ValueError, IndexError) as exc:
             diagnostics.error(
                 f"{value!r} failed to format with the real payload: {exc}",
                 location=location.location,

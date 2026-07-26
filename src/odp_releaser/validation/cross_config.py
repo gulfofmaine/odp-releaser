@@ -19,6 +19,7 @@ from odp_releaser.manifests.helpers import resolve_manifest_path
 from odp_releaser.schemas.manifest_config import (
     ImageConfig,
     config_matches_event,
+    resolve_comment_config,
     resolve_setting,
 )
 
@@ -39,7 +40,18 @@ if TYPE_CHECKING:
 # `defaults` via `resolve_setting`) and warns about when matching configs for
 # one event disagree; kept as a tuple (not hardcoded per-call) so the
 # agreement check covers exactly the same set `bump_images` itself resolves.
-_AGREEMENT_ATTRS = ("environment", "environment_url", "reviewers", "team_reviewers")
+_AGREEMENT_ATTRS = (
+    "environment",
+    "environment_url",
+    "reviewers",
+    "team_reviewers",
+    "comment",
+)
+
+# Events whose client payload can carry a source pull request. `make_payload`
+# only looks one up for `push` (see `resolve_client_payload`), so a config that
+# fires on nothing else can never have a pull request to comment on.
+_EVENTS_WITH_PULL_REQUESTS = frozenset({"push"})
 
 
 def _known_events() -> tuple[str, ...]:
@@ -90,6 +102,9 @@ def check_cross_config(
             config_path, image_name, event, matching, location, diagnostics
         )
         _check_unused_reviewers(
+            image_name, event, matching, defaults, location, diagnostics
+        )
+        _check_unusable_comment(
             image_name, event, matching, defaults, location, diagnostics
         )
         if len(matching) > 1:
@@ -200,6 +215,70 @@ def _check_unused_reviewers(
             f"'commit' for event {event!r} on image {image_name!r}; only "
             "pull_request mode ever requests reviewers, so these are never "
             "used",
+            location=location.location,
+            line=location.line,
+        )
+
+
+def _check_unusable_comment(
+    image_name: str,
+    event: str,
+    matching: Sequence[ImageConfig],
+    defaults: ConfigDefaults,
+    location: ConfigLocation,
+    diagnostics: Diagnostics,
+) -> None:
+    """Warn when a *deliberately configured* comment can never be posted.
+
+    Both checks are deliberately scoped to comment settings someone wrote down.
+    Commenting is on by default with built-in templates, so warning about the
+    resolved value would fire on every release-only or commit-mode config in
+    every existing manifest -- describing the shipped default, not a mistake.
+    An explicit setting, on the other hand, expresses an intent that these two
+    situations silently defeat:
+
+    - The event carries no source pull request. ``make_payload`` only resolves
+      one for ``push`` events, so a release-only or workflow_dispatch-only
+      config has nothing to comment on no matter what its templates say.
+    - An explicit ``staged`` template can never be reached, because
+      ``update_mode`` resolves to ``commit`` for this event and a direct commit
+      is reported as deployed immediately. This mirrors
+      :func:`_check_unused_reviewers`, including its reason for resolving
+      ``update_mode`` across the whole matching group rather than per config.
+    """
+    configured = [
+        image_config.comment
+        for image_config in matching
+        if image_config.comment is not None
+    ]
+    if defaults.comment is not None:
+        configured.append(defaults.comment)
+    if not configured:
+        return
+
+    comment = resolve_comment_config(
+        _effective_setting(matching, defaults.comment, "comment"), defaults.comment
+    )
+    if not comment.enabled:
+        return
+
+    if event not in _EVENTS_WITH_PULL_REQUESTS:
+        diagnostics.warning(
+            f"a comment is configured for image {image_name!r} but event "
+            f"{event!r} never carries a source pull request (only push events "
+            "do), so no comment can be posted for it",
+            location=location.location,
+            line=location.line,
+        )
+        return
+
+    explicit_staged = any(setting.staged for setting in configured)
+    if explicit_staged and _effective_update_mode(matching) == "commit":
+        diagnostics.warning(
+            f"comment.staged is set but update_mode resolves to 'commit' for "
+            f"event {event!r} on image {image_name!r}; a direct commit is "
+            "reported as deployed immediately, so only comment.deployed is "
+            "ever used",
             location=location.location,
             line=location.line,
         )
