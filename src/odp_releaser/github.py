@@ -3,8 +3,8 @@
 This module is the only place in the package that talks to the GitHub REST
 API. It resolves per-owner GitHub App credentials, mints installation access
 tokens scoped to a single repository, sends ``repository_dispatch`` events,
-and reports deployments back to source repos. Nothing outside this module
-should touch HTTP directly.
+and reports back to source repos — as deployments, and as a comment on the
+source pull request. Nothing outside this module should touch HTTP directly.
 
 Secrets (private keys and access tokens) are never logged.
 """
@@ -84,6 +84,39 @@ class AppNotInstalledOnOrgError(Exception):
         super().__init__(
             f"The {role} app is not installed on the {org} organization. "
             f"Install the {org} org's {role} app first."
+        )
+
+
+class PermissionsNotGrantedError(Exception):
+    """The app is installed, but was never granted a requested permission.
+
+    GitHub refuses to mint an installation token with permissions broader than
+    the app itself holds (422; "The installation access token cannot be granted
+    permissions that the app was not granted"). The common cause is a *new*
+    permission added to an existing app: every installation has to accept the
+    updated permission request before tokens can carry it.
+    """
+
+    def __init__(
+        self,
+        owner: str,
+        repo: str,
+        permissions: dict[str, str],
+        *,
+        role: str = "reporter",
+    ) -> None:
+        self.owner = owner
+        self.repo = repo
+        self.permissions = permissions
+        requested = ", ".join(
+            f"{name}: {level}" for name, level in sorted(permissions.items())
+        )
+        super().__init__(
+            f"The {role} app on {owner}/{repo} has not been granted the "
+            f"permissions this token needs ({requested}). Add them to the app, "
+            f"then have {owner} accept the permission request GitHub sends for "
+            "the existing installation — a newly requested permission stays "
+            "inactive until the installation owner accepts it."
         )
 
 
@@ -222,6 +255,11 @@ def installation_token_for(
     creates an installation access token restricted to that repository with
     ``permissions`` (``contents: write`` by default). Returns the token
     string. ``role`` only labels error messages and logs.
+
+    Asking for a permission the app doesn't hold is a 422 rather than a
+    silently narrower token, and is raised as
+    :class:`PermissionsNotGrantedError` — the expected failure while a source
+    org has yet to accept a newly added permission.
     """
     if permissions is None:
         permissions = DEFAULT_TOKEN_PERMISSIONS
@@ -240,13 +278,20 @@ def installation_token_for(
             repo,
             installation_id,
         )
-        response = github.rest.apps.create_installation_access_token(
-            installation_id,
-            data={
-                "repositories": [repo],
-                "permissions": permissions,
-            },
-        )
+        try:
+            response = github.rest.apps.create_installation_access_token(
+                installation_id,
+                data={
+                    "repositories": [repo],
+                    "permissions": permissions,
+                },
+            )
+        except RequestFailed as exc:
+            if exc.response.status_code == 422:
+                raise PermissionsNotGrantedError(
+                    owner, repo, permissions, role=role
+                ) from exc
+            raise
     token: str = response.json()["token"]
     return token
 
@@ -402,10 +447,53 @@ def create_deployment_status(
         )
 
 
-def upsert_pr_comment(repo: str, pr_number: int, body: str, token: str) -> None:
-    """Create or update a bot comment on a pull request.
+def upsert_pr_comment(
+    repo: str, pr_number: int, body: str, token: str, *, marker: str
+) -> str:
+    """Create or update this deploy repo's comment on a pull request.
 
-    Reserved for a future (v2) ``comment`` command that reports where images
-    were deployed back onto the source pull request.
+    ``repo`` is an ``owner/name`` slug. ``marker`` is the invisible key
+    :func:`odp_releaser.comment_body.comment_marker` embeds in ``body``: the
+    first existing comment containing it is updated in place, and a new comment
+    is posted when none does. That keeps reruns idempotent while leaving other
+    deploy repos' (and other images') comments untouched.
+
+    Every comment on the pull request is paged through because the issue
+    comments endpoint offers no sort or filter — a marker sitting on a later
+    page of a busy pull request would otherwise be missed and duplicated.
+    Returns the comment's ``html_url``.
+
+    Needs a token with ``pull-requests: write``; a pull request that can't be
+    commented on (locked, archived repository) surfaces as ``RequestFailed``
+    for the caller to report.
     """
-    raise NotImplementedError
+    owner, _, name = repo.partition("/")
+    with GitHub(TokenAuthStrategy(token)) as github:
+        existing_id: int | None = None
+        for comment in github.rest.paginate(
+            github.rest.issues.list_comments,
+            # Raw JSON rather than parsed models, like `list_deployments` and
+            # `pr_for_commit`: only `id` and `body` are needed, and the full
+            # IssueComment model would make every caller (and every test
+            # fixture) supply fields this has no use for.
+            lambda response: response.json(),
+            owner=owner,
+            repo=name,
+            issue_number=pr_number,
+        ):
+            if marker in (comment.get("body") or ""):
+                existing_id = comment["id"]
+                break
+
+        if existing_id is not None:
+            logger.debug("Updating comment %s on %s#%s", existing_id, repo, pr_number)
+            response = github.rest.issues.update_comment(
+                owner, name, existing_id, data={"body": body}
+            )
+        else:
+            logger.debug("Creating a comment on %s#%s", repo, pr_number)
+            response = github.rest.issues.create_comment(
+                owner, name, pr_number, data={"body": body}
+            )
+    comment_url: str = response.json()["html_url"]
+    return comment_url
