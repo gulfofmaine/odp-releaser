@@ -3,10 +3,18 @@
 When ``bump-images`` opens a pull request instead of committing directly, the
 deployment reported to the source repo is only ``queued`` — nothing is live
 until the PR merges. To let a merge-time workflow finish the report, the bump
-embeds everything ``report-deployment`` needs (the client payload plus the
-resolved environment name and URL) into the PR body as an invisible HTML
-comment. ``peter-evans/create-pull-request`` rewrites the body on every push
-to the bump branch, so the metadata always reflects the latest bump.
+embeds everything ``report-deployment`` and ``comment`` need (the client
+payload, the resolved environment name and URL, and the resolved comment
+templates plus the source pull request number) into the PR body as an
+invisible HTML comment. ``peter-evans/create-pull-request`` rewrites the body
+on every push to the bump branch, so the metadata always reflects the latest
+bump.
+
+Carrying the comment settings here is what lets ``report-merged.yml`` flip a
+*staged* comment to *deployed* without checking out the deploy repo at all —
+it never reads the image manifest, so anything the merge-time run needs has to
+travel in the body. Every field added since the first release is optional, so
+a pull request opened by an older ``odp-releaser`` still parses.
 """
 
 from __future__ import annotations
@@ -16,16 +24,19 @@ import json
 from pydantic import BaseModel
 
 from odp_releaser.schemas.client_payload import ClientPayload
+from odp_releaser.schemas.manifest_config import ResolvedComment
 
 MARKER = "<!-- odp-releaser:report-deployment"
 
 
 class ReportMetadata(BaseModel):
-    """Everything ``report-deployment`` needs, carried in the bump PR body."""
+    """Everything ``report-deployment`` and ``comment`` need, in the bump PR body."""
 
     environment: str | None = None
     environment_url: str | None = None
     client_payload: ClientPayload
+    comment: ResolvedComment | None = None
+    comment_pr_number: int | None = None
 
 
 def embed_metadata(metadata: ReportMetadata) -> str:

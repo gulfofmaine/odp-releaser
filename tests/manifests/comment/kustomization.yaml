@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mariners-dashboard-dev
+
+resources:
+  - image-pull-secret.yaml
+
+images:
+  - name: gmri/neracoos-mariners-dashboard
+    newTag: "5763586"
+  - name: gmri/neracoos-mariners-dashboard-quiet
+    newTag: "5763586"

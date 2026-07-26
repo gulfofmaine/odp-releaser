@@ -17,6 +17,10 @@ from odp_releaser.github import AppNotInstalledOnOrgError
 from odp_releaser.main import app
 from odp_releaser.report_metadata import extract_metadata
 from odp_releaser.schemas.dispatch import DispatchAppCredentials
+from odp_releaser.schemas.manifest_config import (
+    DEFAULT_DEPLOYED_TEMPLATE,
+    DEFAULT_STAGED_TEMPLATE,
+)
 
 MANIFESTS_DIR = Path(__file__).parent / "manifests"
 
@@ -113,6 +117,84 @@ def test_success_path_writes_github_output(
     assert outputs["environment_url"] == ""
     assert outputs["reviewers"] == ""
     assert outputs["team_reviewers"] == ""
+
+    # Commenting is on by default, and the bundled push payload carries the
+    # source pull request the comment lands on.
+    assert outputs["comment_enabled"] == "true"
+    assert outputs["comment_pr_number"] == "142"
+    assert outputs["comment_staged_template"] == DEFAULT_STAGED_TEMPLATE
+    assert outputs["comment_deployed_template"] == DEFAULT_DEPLOYED_TEMPLATE
+    assert metadata.comment is not None
+    assert metadata.comment.enabled is True
+    assert metadata.comment.staged == DEFAULT_STAGED_TEMPLATE
+    assert metadata.comment.deployed == DEFAULT_DEPLOYED_TEMPLATE
+    assert metadata.comment_pr_number == 142
+
+
+def test_comment_pr_number_is_empty_without_a_source_pull_request(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A release-event payload carries no pull request, so there is nothing to
+    comment on; the comment step is skipped on the empty number rather than
+    failing."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    client_payload = load_client_payload(EventType.release)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+    assert client_payload.source.pr is None
+
+    bump_images(
+        config_path=MANIFESTS_DIR / "comment" / "image_manifest.yaml",
+        client_payload=client_payload.model_dump_json(),
+        dry_run=True,
+    )
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["comment_enabled"] == "true"
+    assert outputs["comment_pr_number"] == ""
+
+
+def test_comment_config_resolves_from_defaults_and_image_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Each comment field is inherited on its own: this config overrides only
+    `staged`, so the defaults-level `deployed` survives."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+
+    bump_images(
+        config_path=MANIFESTS_DIR / "comment" / "image_manifest.yaml",
+        client_payload=client_payload.model_dump_json(),
+        dry_run=True,
+    )
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["comment_enabled"] == "true"
+    assert outputs["comment_staged_template"] == "config staged {image_name}"
+    assert outputs["comment_deployed_template"] == "defaults deployed {new_tag}"
+
+
+def test_comment_can_be_disabled_at_the_defaults_level(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard-quiet", client_payload)
+
+    bump_images(
+        config_path=MANIFESTS_DIR / "comment" / "image_manifest.yaml",
+        client_payload=client_payload.model_dump_json(),
+        dry_run=True,
+    )
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["comment_enabled"] == "false"
 
 
 def test_dagster_helm_and_kustomize_dry_run(

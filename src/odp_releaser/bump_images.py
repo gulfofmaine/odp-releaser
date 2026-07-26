@@ -32,6 +32,7 @@ from odp_releaser.schemas.manifest_config import (
     ImageConfig,
     ManifestConfig,
     configs_for_event,
+    resolve_comment_config,
     resolve_setting,
 )
 from odp_releaser.validation.image_manifest import validate_image_configs
@@ -159,6 +160,7 @@ def bump_images(
     environment_url: str | None = None
     reviewers: list[str] = []
     team_reviewers: list[str] = []
+    comment = resolve_comment_config(None, config.defaults.comment)
 
     if image_configs := config.images.get(payload.image_name):
         logger.debug("Configs for the image:")
@@ -230,6 +232,15 @@ def bump_images(
             )
             or []
         )
+        comment = resolve_comment_config(
+            _resolve_config_setting(
+                authorized_configs,
+                config.defaults.comment,
+                "comment",
+                payload.image_name,
+            ),
+            config.defaults.comment,
+        )
 
         for image_config in authorized_configs:
             for kustomize_manifest in image_config.kustomize_manifests:
@@ -265,10 +276,16 @@ def bump_images(
 
     logger.info(f"Commit message: \n{'\n'.join(commit_message)}")
 
+    # The source pull request is only known for events that carry one (push,
+    # via `pr_for_commit`); a release or workflow_dispatch dispatch has nothing
+    # to comment on, and the workflow skips the comment step on the empty value.
+    comment_pr_number = payload.source.pr.number if payload.source.pr else None
     metadata = ReportMetadata(
         environment=environment,
         environment_url=environment_url,
         client_payload=payload,
+        comment=comment,
+        comment_pr_number=comment_pr_number,
     )
     sanitized_image_name = payload.image_name.replace("/", "-")
     pr_title, pr_body = _pr_title_and_body(commit_message, metadata)
@@ -286,6 +303,13 @@ def bump_images(
             "pr_body": pr_body,
             "reviewers": ",".join(reviewers),
             "team_reviewers": ",".join(team_reviewers),
+            # Templates go out unrendered: the bump pull request's URL only
+            # exists after the create-pull-request step runs, so `odp-releaser
+            # comment` does the rendering with that URL in hand.
+            "comment_enabled": "true" if comment.enabled else "false",
+            "comment_pr_number": str(comment_pr_number) if comment_pr_number else "",
+            "comment_staged_template": comment.staged,
+            "comment_deployed_template": comment.deployed,
         }
     )
     write_step_summary(f"# {'\n'.join(commit_message)}")
