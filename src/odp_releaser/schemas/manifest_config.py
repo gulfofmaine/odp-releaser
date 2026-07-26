@@ -119,6 +119,83 @@ class FileManifest(BaseModel):
     ]
 
 
+# The comment bodies `odp-releaser comment` posts back on the source pull
+# request when a config doesn't override them. Deliberately restricted to
+# placeholders that are always populated (see the test in
+# tests/test_manifest_config.py): `environment_url` can resolve to an empty
+# string at bump time, which would render a dangling markdown link here.
+DEFAULT_STAGED_TEMPLATE = """\
+### 📦 `{image_name}` staged for `{environment}`
+
+Tag `{new_tag}` is staged in [`{deploy_repo}`]({bump_url}) and is waiting on \
+review before it deploys.
+
+<sub>Bumped by [odp-releaser]({run_url}) from `{git_sha}`.</sub>"""
+
+DEFAULT_DEPLOYED_TEMPLATE = """\
+### 🚀 `{image_name}` deployed to `{environment}`
+
+Tag `{new_tag}` landed in [`{deploy_repo}`]({bump_url}).
+
+<sub>Bumped by [odp-releaser]({run_url}) from `{git_sha}`.</sub>"""
+
+
+class CommentConfig(BaseModel):
+    """Comment posted back on the source pull request when this image is bumped.
+
+    Every field is optional and inherited independently: an unset field takes
+    the ``defaults``-level value, then the built-in template. See
+    :func:`resolve_comment_config`.
+    """
+
+    enabled: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Whether to comment on the source pull request for this "
+                "config's bumps. Unset inherits the defaults-level value, "
+                "which itself defaults to true"
+            ),
+        ),
+    ] = None
+    staged: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Comment body posted while a pull_request-mode bump is open "
+                "and awaiting review. May reference the comment placeholders "
+                "(see the docs); escape literal braces as `{{`/`}}`. Unset "
+                "inherits the defaults-level value, then the built-in template"
+            ),
+        ),
+    ] = None
+    deployed: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Comment body posted once the bump has landed -- immediately "
+                "for a commit-mode bump, or when the bump pull request merges. "
+                "Unset inherits the defaults-level value, then the built-in "
+                "template"
+            ),
+        ),
+    ] = None
+
+
+class ResolvedComment(BaseModel):
+    """A :class:`CommentConfig` with every level of inheritance applied.
+
+    ``bump_images`` resolves this once and hands it to ``odp-releaser
+    comment`` (and embeds it in the bump pull request body for the merge-time
+    run), so no consumer has to re-apply the inheritance rules or handle an
+    unset field.
+    """
+
+    enabled: bool
+    staged: str
+    deployed: str
+
+
 class AllowedActors(BaseModel):
     """Actors allowed to trigger a config's bumps. Both lists empty denies everyone."""
 
@@ -194,6 +271,17 @@ class ImageConfig(BaseModel):
                 "`{new_tag}`, `{git_sha}`, and `{digest}`. Overrides the "
                 "defaults-level environment_url; unset falls back to the "
                 "bump commit or pull request URL"
+            ),
+        ),
+    ] = None
+    comment: Annotated[
+        CommentConfig | None,
+        Field(
+            description=(
+                "Comment posted back on the source pull request for this "
+                "config's bumps. Each field is inherited from the "
+                "defaults-level setting independently, so overriding one "
+                "template keeps the other"
             ),
         ),
     ] = None
@@ -289,6 +377,17 @@ class ConfigDefaults(BaseModel):
         ),
     ] = None
 
+    comment: Annotated[
+        CommentConfig | None,
+        Field(
+            description=(
+                "Default comment posted back on source pull requests when "
+                "images are bumped. Overridable per image config, field by "
+                "field; unset falls back to the built-in templates"
+            ),
+        ),
+    ] = None
+
     reviewers: Annotated[
         list[str] | None,
         Field(
@@ -326,6 +425,49 @@ def resolve_setting[SettingT](
     (which imports the validator in a later step).
     """
     return config_value if config_value is not None else default
+
+
+def resolve_comment_config(
+    config_value: CommentConfig | None, default: CommentConfig | None
+) -> ResolvedComment:
+    """A config's comment settings, resolved field by field.
+
+    Unlike every other setting, comment settings are *not* resolved with
+    :func:`resolve_setting`. That function replaces a default wholesale, which
+    for a nested model means a config overriding only ``deployed`` would
+    silently discard a ``defaults``-level ``staged`` template -- the two
+    templates describe different lifecycle states and are meant to be set
+    independently. So each field falls back on its own: config, then
+    ``defaults``, then the built-in.
+
+    Within a single field the inheritance rule is still
+    :func:`resolve_setting`'s: only an unset (``None``) value inherits, so an
+    explicit ``staged: ""`` is a deliberate "post nothing while staged".
+    """
+    return ResolvedComment(
+        enabled=_resolve_comment_field(config_value, default, "enabled", True),
+        staged=_resolve_comment_field(
+            config_value, default, "staged", DEFAULT_STAGED_TEMPLATE
+        ),
+        deployed=_resolve_comment_field(
+            config_value, default, "deployed", DEFAULT_DEPLOYED_TEMPLATE
+        ),
+    )
+
+
+def _resolve_comment_field[FieldT](
+    config_value: CommentConfig | None,
+    default: CommentConfig | None,
+    attr: str,
+    builtin: FieldT,
+) -> FieldT:
+    """One :class:`CommentConfig` field resolved across all three levels."""
+    for source in (config_value, default):
+        if source is not None:
+            value: FieldT | None = getattr(source, attr)
+            if value is not None:
+                return value
+    return builtin
 
 
 def config_matches_event(image_config: ImageConfig, event: str) -> bool:
@@ -390,6 +532,12 @@ EXAMPLE_MANIFEST = ManifestConfig(
         ),
         environment="staging",
         environment_url="https://staging.neracoos.org",
+        # Short single-line overrides: the multi-line built-in templates would
+        # round-trip through this example as quoted scalars with escaped
+        # newlines, which reads badly in the generated docs.
+        comment=CommentConfig(
+            deployed="🚀 `{image_name}` `{new_tag}` deployed to `{environment}`",
+        ),
         reviewers=["abkfenris"],
         team_reviewers=["deployers"],
     ),
@@ -402,6 +550,9 @@ EXAMPLE_MANIFEST = ManifestConfig(
                 update_mode="pull_request",
                 environment="production",
                 environment_url="https://mariners.neracoos.org",
+                comment=CommentConfig(
+                    staged="📦 `{image_name}` `{new_tag}` staged in {bump_url}",
+                ),
                 reviewers=["abkfenris"],
                 team_reviewers=["mariners"],
                 kustomize_manifests=[

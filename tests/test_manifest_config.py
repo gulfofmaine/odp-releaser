@@ -11,13 +11,19 @@ from ruamel.yaml import YAML
 from odp_releaser.main import app
 from odp_releaser.schemas.example_yaml import example_yaml
 from odp_releaser.schemas.manifest_config import (
+    DEFAULT_DEPLOYED_TEMPLATE,
+    DEFAULT_STAGED_TEMPLATE,
     EXAMPLE_MANIFEST,
+    CommentConfig,
     FileManifest,
     ImageConfig,
     KustomizeManifest,
     ManifestConfig,
+    ResolvedComment,
     config_matches_event,
     configs_for_event,
+    resolve_comment_config,
+    resolve_setting,
 )
 
 MANIFESTS_DIR = Path(__file__).parent / "manifests"
@@ -171,3 +177,98 @@ def test_configs_for_event_filters_and_preserves_config_order() -> None:
     result = configs_for_event([push_only, matches_all, release_only], "push")
 
     assert result == [push_only, matches_all]
+
+
+# --- resolve_comment_config ---------------------------------------------------
+
+
+def test_resolve_comment_config_falls_back_to_builtin_templates() -> None:
+    resolved = resolve_comment_config(None, None)
+
+    assert resolved == ResolvedComment(
+        enabled=True,
+        staged=DEFAULT_STAGED_TEMPLATE,
+        deployed=DEFAULT_DEPLOYED_TEMPLATE,
+    )
+
+
+def test_resolve_comment_config_merges_field_by_field() -> None:
+    """A config overriding one template keeps the default's other template.
+
+    This is the whole reason the helper exists rather than reusing
+    ``resolve_setting`` -- see the regression guard below.
+    """
+    default = CommentConfig(staged="defaults staged", deployed="defaults deployed")
+    config = CommentConfig(deployed="config deployed")
+
+    resolved = resolve_comment_config(config, default)
+
+    assert resolved.staged == "defaults staged"
+    assert resolved.deployed == "config deployed"
+    assert resolved.enabled is True
+
+
+def test_resolve_setting_would_drop_the_sibling_field() -> None:
+    """Guard on why ``resolve_comment_config`` can't just be ``resolve_setting``.
+
+    ``resolve_setting`` replaces a default wholesale, so the ``defaults``-level
+    ``staged`` template would silently vanish the moment a config sets only
+    ``deployed``.
+    """
+    default = CommentConfig(staged="defaults staged", deployed="defaults deployed")
+    config = CommentConfig(deployed="config deployed")
+
+    wholesale = resolve_setting(config, default)
+
+    assert wholesale is config
+    assert wholesale is not None
+    assert wholesale.staged is None  # the bug the per-field helper avoids
+
+
+def test_resolve_comment_config_config_template_wins_over_default() -> None:
+    default = CommentConfig(staged="defaults staged")
+    config = CommentConfig(staged="config staged")
+
+    resolved = resolve_comment_config(config, default)
+
+    assert resolved.staged == "config staged"
+    assert resolved.deployed == DEFAULT_DEPLOYED_TEMPLATE
+
+
+def test_resolve_comment_config_inherits_disabled_from_defaults() -> None:
+    resolved = resolve_comment_config(None, CommentConfig(enabled=False))
+
+    assert resolved.enabled is False
+
+
+def test_resolve_comment_config_re_enables_at_config_level() -> None:
+    resolved = resolve_comment_config(
+        CommentConfig(enabled=True), CommentConfig(enabled=False)
+    )
+
+    assert resolved.enabled is True
+
+
+def test_resolve_comment_config_empty_template_is_not_treated_as_unset() -> None:
+    """An explicit empty template replaces the default, like other settings.
+
+    ``resolve_setting`` only inherits on ``None``; an explicit empty value is a
+    deliberate override. Comment templates follow the same rule so
+    ``staged: ""`` is a way to say "post nothing while staged".
+    """
+    resolved = resolve_comment_config(CommentConfig(staged=""), None)
+
+    assert resolved.staged == ""
+    assert resolved.deployed == DEFAULT_DEPLOYED_TEMPLATE
+
+
+def test_builtin_templates_only_use_always_populated_placeholders() -> None:
+    """The built-ins must never render a half-empty link or a dangling '@'.
+
+    ``environment_url`` and ``image_ref`` can legitimately resolve to an empty
+    string at bump time, so the shipped defaults stay off them; a user template
+    may still use them.
+    """
+    for template in (DEFAULT_STAGED_TEMPLATE, DEFAULT_DEPLOYED_TEMPLATE):
+        assert "{environment_url}" not in template
+        assert "{digest}" not in template
