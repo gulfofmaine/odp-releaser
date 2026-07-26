@@ -50,7 +50,11 @@ Deploy repos can also close the loop: with a reporter GitHub App configured,
 `bump-images` reports each bump back to the source repo as a GitHub deployment
 (shown on the source PR timeline and Environments sidebar), and a
 `report-merged` workflow flips a bump pull request's `queued` deployment to
-`success` once it merges.
+`success` once it merges. If that app is additionally granted
+`Pull requests: Read and write`, each bump also comments on the source pull
+request — reading `staged` while a bump PR awaits review, and rewritten as
+`deployed` once it lands — from a built-in template that can be overridden per
+image or repo-wide.
 
 The workflows are built from composite actions (`install`, `bump_images`, and
 `report_deployment`) that deploy repos can also use directly — including a

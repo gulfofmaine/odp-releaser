@@ -4,12 +4,12 @@ icon: lucide/blocks
 
 # Composite Actions
 
-Alongside the [reusable workflows](workflows.md), `odp-releaser` ships three
+Alongside the [reusable workflows](workflows.md), `odp-releaser` ships four
 composite GitHub Actions for deploy repos that need more control than
 `bump-images.yml` offers — most commonly to run extra steps *after* the bump
 (e.g. syncing the freshly published image to another registry) before
-anything is committed, or to report deployments back to source repos from a
-custom workflow.
+anything is committed, or to report deployments and pull request comments back
+to source repos from a custom workflow.
 
 The actions live in this repo and are referenced with the standard
 `owner/repo/path@ref` syntax:
@@ -18,6 +18,7 @@ The actions live in this repo and are referenced with the standard
 uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
 uses: gulfofmaine/odp-releaser/.github/actions/bump_images@<sha-or-tag>
 uses: gulfofmaine/odp-releaser/.github/actions/report_deployment@<sha-or-tag>
+uses: gulfofmaine/odp-releaser/.github/actions/comment_on_pr@<sha-or-tag>
 ```
 
 The reusable workflows use these same actions internally, checked out at
@@ -144,6 +145,10 @@ jobs:
 | `pr_body` | Generated pull request body for the bump (includes the embedded [report metadata](#report_deployment)). |
 | `reviewers` | Comma-separated GitHub usernames requested as reviewers on the bump pull request; empty when none are configured. |
 | `team_reviewers` | Comma-separated GitHub team slugs requested as reviewers on the bump pull request; empty when none are configured. |
+| `comment_enabled` | Whether commenting back on the source pull request is enabled for this image (`"true"`/`"false"`). |
+| `comment_pr_number` | Source pull request the comment lands on; empty for events that carry no pull request (`release`, `workflow_dispatch`). |
+| `comment_staged_template` | Resolved comment template for a bump pull request awaiting review, unrendered — pass to [`comment_on_pr`](#comment_on_pr). |
+| `comment_deployed_template` | Resolved comment template for a landed bump, unrendered. |
 
 ## `report_deployment`
 
@@ -218,4 +223,94 @@ packages up — prefer the reusable workflow unless you need to customize it.)
 | `verbosity` | no | `"1"` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
 | `reporter_apps` | no | `""` | JSON object mapping source `owner -> {app_id, private_key}` reporter app credentials, for deploy repos that report to multiple source orgs. |
 | `reporter_app_id` | no | `""` | App ID of the reporter GitHub App installed on the source repos. |
+| `reporter_app_private_key` | no | `""` | Private key matching `reporter_app_id`. |
+
+## `comment_on_pr`
+
+Runs `odp-releaser comment`, which posts (or updates) a markdown comment on
+the **source** repository's pull request saying which image was bumped and
+where — the readable counterpart to the deployment record.
+`bump-images.yml` runs this action after the deployment report, and
+`report-merged.yml` runs it when a bump PR merges; use it directly when
+composing your own workflow from the `bump_images` action.
+
+Which template is used follows `update_mode`: `pull_request` posts the `staged`
+comment (the bump is waiting on review, nothing is live), `commit` posts the
+`deployed` one. See
+[Pull request comments](config/image_manifest.md#pull-request-comments) for the
+templates and their placeholders.
+
+Provide exactly one of:
+
+- `client_payload` — right after a bump, the same payload the bump ran with,
+  with the templates passed in from the `bump_images` outputs;
+- `pr_body` — after a bump pull request closed, the body of that PR. The
+  payload, environment, comment templates and source pull request number that
+  `bump_images` embedded at bump time are read back out, so no image manifest
+  (and no deploy-repo checkout) is needed. A body without embedded metadata, or
+  one from before comment support, is a friendly no-op.
+
+Reruns **update the same comment** rather than adding another: it is found by
+an invisible marker keyed on the deploy repo, the image, and the environment,
+so another deploy repo's or another image's comment on the same pull request is
+never touched.
+
+Prerequisites:
+
+- The `odp-releaser` CLI is on the PATH — run the `install` action first
+  (same sibling-action composition as `bump_images`).
+- Reporter app credentials for the source org, whose app has been granted
+  `Pull requests: Read and write` **and whose installations have accepted that
+  permission** — see
+  [Pull request comments](github_apps.md#pull-request-comments). The minted
+  token is scoped to the single source repository with `pull_requests: write`
+  only.
+
+Nothing is posted, and the step still succeeds, when `comment_enabled` is
+`"false"`, when the chosen template is empty, or when there is no source pull
+request to comment on (only `push` payloads carry one). Other failures exit
+non-zero; wrap the action in `continue-on-error: true` (as `bump-images.yml`
+does) when commenting should be best-effort.
+
+```yaml
+- name: Install ODP Releaser
+  uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
+
+- name: Bump images
+  id: bump
+  uses: gulfofmaine/odp-releaser/.github/actions/bump_images@<sha-or-tag>
+
+- name: Comment on the source pull request
+  if: steps.bump.outputs.comment_pr_number != ''
+  continue-on-error: true
+  uses: gulfofmaine/odp-releaser/.github/actions/comment_on_pr@<sha-or-tag>
+  with:
+    update_mode: ${{ steps.bump.outputs.update_mode }}
+    environment: ${{ steps.bump.outputs.environment }}
+    bump_url: ${{ steps.bump.outputs.pull_request_url }}
+    pr_number: ${{ steps.bump.outputs.comment_pr_number }}
+    comment_enabled: ${{ steps.bump.outputs.comment_enabled }}
+    staged_template: ${{ steps.bump.outputs.comment_staged_template }}
+    deployed_template: ${{ steps.bump.outputs.comment_deployed_template }}
+    reporter_app_id: ${{ secrets.REPORTER_APP_ID }}
+    reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }}
+```
+
+### Inputs
+
+| Input | Required | Default | Description |
+| --- | --- | --- | --- |
+| `client_payload` | one of these | `""` | `repository_dispatch` client_payload JSON produced by `odp-releaser notify`. |
+| `pr_body` | one of these | `""` | Body of a merged bump pull request carrying the embedded report metadata. |
+| `update_mode` | no | `commit` | How the bump landed: `commit` posts the deployed comment, `pull_request` posts the staged one. |
+| `environment` | no | `""` | Environment named in the comment, and part of the comment's identity. An environment embedded in `pr_body` wins; empty falls back to the deploy repo's `owner/name` slug. |
+| `environment_url` | no | `""` | Available to templates as `{environment_url}`. A URL embedded in `pr_body` wins; empty falls back to `bump_url`. |
+| `bump_url` | no | `""` | Where the bump lives — the bump commit or pull request URL — available to templates as `{bump_url}`. |
+| `pr_number` | no | `""` | Source pull request to comment on (`bump_images`' `comment_pr_number` output). Empty falls back to the payload's own pull request; none at all is a no-op. |
+| `comment_enabled` | no | `"true"` | Whether to comment at all (`bump_images`' `comment_enabled` output). `"false"` is a no-op. |
+| `staged_template` | no | `""` | Comment body for a `pull_request`-mode bump. A template embedded in `pr_body` wins. |
+| `deployed_template` | no | `""` | Comment body for a landed bump. A template embedded in `pr_body` wins. |
+| `verbosity` | no | `"1"` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
+| `reporter_apps` | no | `""` | JSON object mapping source `owner -> {app_id, private_key}` reporter app credentials, for deploy repos that report to multiple source orgs. |
+| `reporter_app_id` | no | `""` | App ID of the reporter GitHub App installed on the source repos; needs `Pull requests: Read and write`. |
 | `reporter_app_private_key` | no | `""` | Private key matching `reporter_app_id`. |

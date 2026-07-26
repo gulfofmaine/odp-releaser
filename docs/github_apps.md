@@ -29,7 +29,8 @@ each source org it trusts. That ownership model buys a real trust boundary:
 
 The rest of this page covers the two sides of that relationship, the token
 flow the CLI runs on every dispatch, and the symmetric **reporter app** that
-lets a deploy repo report deployments back onto the source repo.
+lets a deploy repo report deployments — and optionally pull request comments —
+back onto the source repo.
 
 ## For deploy org admins
 
@@ -196,7 +197,10 @@ Create the app in your deploy org's settings, like the dispatch app but
 with:
 
 - **Permissions**: Repository permissions → `Deployments: Read and write`.
-  Add Organization permissions → `Members: Read-only` only if your deploy
+  Add `Pull requests: Read and write` only if you want bumps to comment on the
+  source pull request as well (see [Pull request comments](#pull-request-comments)
+  — it's a wider grant, and existing installations have to accept it). Add
+  Organization permissions → `Members: Read-only` only if your deploy
   repos use `allowed_actors` team entries in their image manifests — the
   membership check runs with this app's credentials, since it's the one
   installed where the teams live. Nothing else.
@@ -222,9 +226,11 @@ is best-effort: a failed report never fails the bump itself.
 Install the deploy org's reporter app on the source repos that should
 receive deployment reports (repo **Settings** won't show it — use the app's
 public page / install link the deploy org shares). Before consenting,
-you can verify on that page that the app requests only
-`Deployments: Read and write`. To revoke a deploy org's ability to report,
-uninstall its app — no key coordination needed.
+you can verify on that page exactly what the app requests: `Deployments: Read
+and write` alone if it only records deployments, plus `Pull requests: Read and
+write` if it also comments on your pull requests — which additionally lets it
+edit pull request titles, bodies, labels and reviewers. To revoke a deploy
+org's ability to report, uninstall its app — no key coordination needed.
 
 One caveat: creating a deployment fires a `deployment` webhook/Actions event
 in the source repo. That's harmless unless a source workflow triggers `on:
@@ -259,10 +265,56 @@ a direct commit, `queued` for a bump pull request that still needs review;
 [`report-merged.yml`](workflows.md#report-merged) flips `queued` to
 `success` when the bump PR merges).
 
-### Future: PR comments (v2)
+`odp-releaser comment` runs the same flow for its own, separate token, scoped
+to the same single repo with `permissions: {pull_requests: write}` and nothing
+else. The two are deliberately never combined into one token request: GitHub
+rejects a request for any permission the app hasn't been granted, so a single
+`{deployments, pull_requests}` mint would fail outright — and take deployment
+reporting down with it — for every source org that hasn't accepted the comment
+permission yet.
 
-A reserved **commenter** extension of the reporter role — posting a comment
-on the source pull request in addition to the deployment — is still planned.
-The seam exists in the codebase (`odp_releaser.github.upsert_pr_comment`),
-but it currently raises `NotImplementedError`; a reporter app would need
-`Pull requests: Read and write` added for it once implemented.
+### Pull request comments
+
+Deployments are a precise record but a quiet one: they carry no image name, no
+tag, and no indication of whether the change is live or still waiting on
+review. The reporter app can also post a **comment** on the source pull
+request saying all of that in words — `staged` while a bump pull request awaits
+review in the deploy repo, rewritten as `deployed` once it merges. See
+[Image manifest config](config/image_manifest.md) for the templates and
+[`comment`](cli.md) for the command.
+
+This is opt-in at the app level, because it is a real widening of what the
+reporter app can do:
+
+- **Add `Pull requests: Read and write`** to the app's repository
+  permissions. Confirmed against GitHub's permission reference, that grant
+  alone satisfies the comment endpoints — an `Issues` grant is not needed.
+- **Every existing installation must accept the new permission.** GitHub sends
+  each installation owner a permission request when an app adds one, and
+  tokens keep the *old* permission set until it is accepted. Until a given
+  source org accepts, that org's comments fail (loudly, in the step summary)
+  while its deployment reports keep working — the two are minted as separate
+  tokens precisely so one can't break the other.
+- **It is a wider grant than `Deployments`.** `Pull requests: write` also
+  allows editing pull request titles, bodies, labels, and reviewers on every
+  repo the app is installed on. It cannot merge or push code (that needs
+  `Contents`), but a source org weighing "installing the app *is* the consent"
+  should know it is consenting to more than a deployment record. Leaving the
+  permission off is a perfectly good answer: everything else keeps working.
+
+Two further things worth knowing before turning it on:
+
+- **Only `push` events can be commented on.** The comment lands on the pull
+  request associated with the commit that built the image, which
+  `odp-releaser notify` only resolves for `push` events. Release and
+  `workflow_dispatch` dispatches have no pull request, and the comment step is
+  skipped for them; `odp-releaser validate image-manifest` warns when a config
+  asks for a comment it can never post.
+- **Comments fire `issue_comment` in the source repo**, the same class of
+  caveat as the `deployment` event above. Harmless unless a source workflow
+  triggers `on: issue_comment`.
+
+Each comment is keyed to one `(deploy repo, image, environment)` triple by an
+invisible marker in its body, so reruns edit that same comment instead of
+piling up, and a second deploy repo (or a second image) commenting on the same
+pull request never overwrites the first.
