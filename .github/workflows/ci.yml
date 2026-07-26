@@ -203,6 +203,12 @@ jobs:
       PR_REVIEWERS: ${{ needs.e2e-bump-pr.outputs.reviewers }}
       PR_TEAM_REVIEWERS: ${{ needs.e2e-bump-pr.outputs.team_reviewers }}
       COMMIT_REVIEWERS: ${{ needs.e2e-bump-commit.outputs.reviewers }}
+      PR_COMMENT_ENABLED: ${{ needs.e2e-bump-pr.outputs.comment_enabled }}
+      PR_COMMENT_PR_NUMBER: ${{ needs.e2e-bump-pr.outputs.comment_pr_number }}
+      PR_COMMENT_STAGED:
+        ${{ needs.e2e-bump-pr.outputs.comment_staged_template }}
+      PR_COMMENT_DEPLOYED:
+        ${{ needs.e2e-bump-pr.outputs.comment_deployed_template }}
       E2E_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     steps:
       - name: Assert notify and bump-images outputs
@@ -253,6 +259,15 @@ jobs:
           expect "pr-mode reviewers" "$PR_REVIEWERS" "odp-releaser-e2e-reviewer"
           expect "pr-mode team_reviewers" "$PR_TEAM_REVIEWERS" ""
           expect "commit-mode reviewers" "$COMMIT_REVIEWERS" ""
+          # Commenting is on by default and resolves to the built-in templates,
+          # but a workflow_dispatch payload carries no source pull request, so
+          # the empty number is what makes bump-images.yml skip the step.
+          expect "pr-mode comment_enabled" "$PR_COMMENT_ENABLED" "true"
+          expect "pr-mode comment_pr_number" "$PR_COMMENT_PR_NUMBER" ""
+          expect_contains "pr-mode comment_staged_template" \
+            "$PR_COMMENT_STAGED" "staged for"
+          expect_contains "pr-mode comment_deployed_template" \
+            "$PR_COMMENT_DEPLOYED" "deployed to"
           exit "$fail"
 
   pass:

@@ -17,6 +17,10 @@ from test_bump_image import _parse_github_output
 from odp_releaser.bump_images import bump_images
 from odp_releaser.main import app
 from odp_releaser.notify import load_targets
+from odp_releaser.schemas.manifest_config import (
+    DEFAULT_DEPLOYED_TEMPLATE,
+    DEFAULT_STAGED_TEMPLATE,
+)
 
 E2E_DIR = Path(__file__).parent / "e2e"
 TAG = "e2e-0123456"
@@ -93,6 +97,17 @@ def test_e2e_fixture_chain(
     assert f"Update image {image_name} to {TAG}" in outputs["commit_message"]
     assert manifest_name in outputs["commit_message"]
     assert outputs["pr_title"] == f"Update image {image_name} to {TAG}"
+
+    # Commenting is on by default and resolves to the built-in templates, but a
+    # workflow_dispatch payload carries no source pull request -- the empty
+    # number is what makes bump-images.yml skip the comment step.
+    assert outputs["comment_enabled"] == "true"
+    assert outputs["comment_pr_number"] == ""
+    assert outputs["comment_staged_template"] == DEFAULT_STAGED_TEMPLATE
+    assert outputs["comment_deployed_template"] == DEFAULT_DEPLOYED_TEMPLATE
+    # The rendered bodies are multi-line, so they have to survive the
+    # GITHUB_OUTPUT heredoc round trip intact.
+    assert "\n" in outputs["comment_staged_template"]
 
 
 def test_e2e_deploy_targets_fixture_parses() -> None:

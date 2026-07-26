@@ -17,6 +17,10 @@
 # reporter_app_id / reporter_app_private_key secrets), a successful bump is
 # also reported back to the source repo as a GitHub deployment + status, so
 # the source PR timeline and Environments sidebar show where the image went.
+# If that app has additionally been granted `Pull requests: Read and write`,
+# the bump also comments on the source pull request — `staged` while a bump PR
+# awaits review, `deployed` once it lands. Both reports are best effort and
+# never fail the bump.
 #
 # Minimal caller example:
 #
@@ -124,6 +128,24 @@ on:
           Comma-separated GitHub team slugs requested as reviewers on the bump
           pull request; empty when none are configured.
         value: ${{ jobs.bump.outputs.team_reviewers }}
+      comment_enabled:
+        description: >-
+          Whether commenting back on the source pull request is enabled for this
+          image ("true"/"false").
+        value: ${{ jobs.bump.outputs.comment_enabled }}
+      comment_pr_number:
+        description: >-
+          Source pull request the comment lands on; empty for events that carry
+          no pull request (release, workflow_dispatch).
+        value: ${{ jobs.bump.outputs.comment_pr_number }}
+      comment_staged_template:
+        description: >-
+          Resolved comment template for a bump pull request awaiting review,
+          unrendered.
+        value: ${{ jobs.bump.outputs.comment_staged_template }}
+      comment_deployed_template:
+        description: Resolved comment template for a landed bump, unrendered.
+        value: ${{ jobs.bump.outputs.comment_deployed_template }}
     secrets:
       ci_app_id:
         description: >-
@@ -150,7 +172,9 @@ on:
           (with reporter_app_private_key), a successful bump is reported back to
           the source repo as a GitHub deployment + status, and `allowed_actors`
           team membership is checked with it (the app needs organization
-          "Members: read" for that).
+          "Members: read" for that). Commenting on the source pull request
+          additionally needs "Pull requests: Read and write"; without it the
+          comment step fails harmlessly and the deployment report still lands.
         required: false
       reporter_app_private_key:
         description: Optional private key matching reporter_app_id.
@@ -189,6 +213,11 @@ jobs:
       pr_title: ${{ steps.bump.outputs.pr_title }}
       reviewers: ${{ steps.bump.outputs.reviewers }}
       team_reviewers: ${{ steps.bump.outputs.team_reviewers }}
+      comment_enabled: ${{ steps.bump.outputs.comment_enabled }}
+      comment_pr_number: ${{ steps.bump.outputs.comment_pr_number }}
+      comment_staged_template: ${{ steps.bump.outputs.comment_staged_template }}
+      comment_deployed_template:
+        ${{ steps.bump.outputs.comment_deployed_template }}
     steps:
       - name: Generate app token
         id: app-token
@@ -308,6 +337,38 @@ jobs:
             ${{ steps.bump.outputs.environment_url ||
             steps.bump.outputs.pull_request_url || steps.commit-url.outputs.url
             }}
+          verbosity: ${{ inputs.verbosity }}
+          reporter_apps: ${{ secrets.reporter_apps }}
+          reporter_app_id: ${{ secrets.reporter_app_id }}
+          reporter_app_private_key: ${{ secrets.reporter_app_private_key }}
+
+      - name: Comment on source pull request
+        # Best effort, like the deployment report above: a failed comment never
+        # fails the bump. Skipped outright when the image manifest turned
+        # commenting off, or when the triggering event carried no source pull
+        # request to comment on (only push events do).
+        if:
+          env.HAS_REPORTER_APP == 'true' && inputs.dry_run != true &&
+          steps.bump.outputs.changed == 'true' &&
+          steps.bump.outputs.comment_enabled == 'true' &&
+          steps.bump.outputs.comment_pr_number != ''
+        continue-on-error: true
+        uses: ./.odp-releaser/.github/actions/comment_on_pr
+        with:
+          client_payload:
+            ${{ inputs.client_payload || toJSON(github.event.client_payload) }}
+          update_mode: ${{ steps.bump.outputs.update_mode }}
+          environment: ${{ steps.bump.outputs.environment }}
+          environment_url: ${{ steps.bump.outputs.environment_url }}
+          # Where the bump landed: the pull request for a PR-mode bump, the
+          # bump commit for a direct one.
+          bump_url:
+            ${{ steps.bump.outputs.pull_request_url ||
+            steps.commit-url.outputs.url }}
+          pr_number: ${{ steps.bump.outputs.comment_pr_number }}
+          comment_enabled: ${{ steps.bump.outputs.comment_enabled }}
+          staged_template: ${{ steps.bump.outputs.comment_staged_template }}
+          deployed_template: ${{ steps.bump.outputs.comment_deployed_template }}
           verbosity: ${{ inputs.verbosity }}
           reporter_apps: ${{ secrets.reporter_apps }}
           reporter_app_id: ${{ secrets.reporter_app_id }}
