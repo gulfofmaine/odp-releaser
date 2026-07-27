@@ -14,6 +14,7 @@ Secrets (tokens and private keys) are never logged.
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from typing import NoReturn
 
 import typer
@@ -24,6 +25,7 @@ from odp_releaser.github import (
     AppNotInstalledError,
     MissingCredentialsError,
     PermissionsNotGrantedError,
+    describe_request_failure,
     installation_token_for,
     resolve_reporter_credentials,
 )
@@ -43,6 +45,32 @@ REPORTING_ERRORS = (
     PermissionsNotGrantedError,
     RequestFailed,
 )
+
+
+def describe_error(exc: Exception) -> str:
+    """Reportable text for anything in :data:`REPORTING_ERRORS`.
+
+    Our own exceptions already carry a remediation in their message; a
+    ``RequestFailed`` needs unpacking, since its ``str()`` is githubkit's repr
+    of the response object rather than what GitHub actually said.
+    """
+    if isinstance(exc, RequestFailed):
+        return describe_request_failure(exc)
+    return str(exc)
+
+
+class UpdateMode(StrEnum):
+    """How the bump landed in the deploy repo (``bump-images`` step output).
+
+    An enum rather than a bare string so Typer rejects anything else outright:
+    both reporting commands branch on this to decide what they say (`success`
+    vs `queued`, `deployed` vs `staged`), and a mis-plumbed workflow input
+    silently falling through to the landed branch would announce a bump that is
+    still only staged.
+    """
+
+    commit = "commit"  # pylint: disable=invalid-name
+    pull_request = "pull_request"  # pylint: disable=invalid-name
 
 
 def fail(message: str) -> NoReturn:

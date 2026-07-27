@@ -46,6 +46,8 @@ from odp_releaser.github_output import write_step_summary
 from odp_releaser.logger import logger
 from odp_releaser.report_inputs import (
     REPORTING_ERRORS,
+    UpdateMode,
+    describe_error,
     reporter_token,
     resolve_source_inputs,
 )
@@ -83,7 +85,7 @@ def comment_on_pr(
         ),
     ] = None,
     update_mode: Annotated[
-        str,
+        UpdateMode,
         typer.Option(
             envvar="UPDATE_MODE",
             help=(
@@ -92,7 +94,7 @@ def comment_on_pr(
                 "`pull_request` posts the staged one"
             ),
         ),
-    ] = "commit",
+    ] = UpdateMode.commit,
     environment: Annotated[
         str | None,
         typer.Option(
@@ -200,8 +202,8 @@ def comment_on_pr(
     environment_url = environment_url or None
     bump_url = bump_url or None
     run_url = run_url or None
-    staged_template = staged_template if staged_template != "" else None
-    deployed_template = deployed_template if deployed_template != "" else None
+    staged_template = staged_template or None
+    deployed_template = deployed_template or None
 
     payload, metadata = resolve_source_inputs(client_payload, pr_body)
     if payload is None:
@@ -249,7 +251,9 @@ def comment_on_pr(
         return
 
     state = (
-        CommentState.staged if update_mode == "pull_request" else CommentState.deployed
+        CommentState.staged
+        if update_mode is UpdateMode.pull_request
+        else CommentState.deployed
     )
     template = comment.staged if state is CommentState.staged else comment.deployed
     if not template:
@@ -273,7 +277,7 @@ def comment_on_pr(
         deploy_repo=github_repository,
         environment=environment,
         environment_url=environment_url,
-        update_mode=update_mode,
+        update_mode=update_mode.value,
         bump_url=bump_url,
         run_url=run_url,
         state=state,
@@ -297,7 +301,7 @@ def comment_on_pr(
             marker=comment_marker(github_repository, payload.image_name, environment),
         )
     except REPORTING_ERRORS as exc:
-        _fail(f"Failed to comment on {payload.repo}#{pr_number}: {exc}")
+        _fail(f"Failed to comment on {payload.repo}#{pr_number}: {describe_error(exc)}")
 
     message = (
         f"Commented `{state.value}` bump of `{payload.image_name}:"

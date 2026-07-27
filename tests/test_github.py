@@ -671,6 +671,94 @@ def test_installation_token_for_reports_ungranted_permissions(
     assert excinfo.value.permissions == {"pull_requests": "write"}
 
 
+def test_installation_token_for_leaves_an_unrelated_422_alone(
+    rsa_private_key: str,
+) -> None:
+    """422 covers more than ungranted permissions.
+
+    A renamed or transferred source repo makes the `repositories` entry
+    inaccessible, which is also a 422 — telling the user to accept a permission
+    request they already accepted would send them the wrong way, so that stays a
+    plain RequestFailed carrying GitHub's own message.
+    """
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/installation").mock(
+            return_value=httpx.Response(200, json={"id": 999})
+        )
+        router.post("/app/installations/999/access_tokens").mock(
+            return_value=httpx.Response(
+                422,
+                json={
+                    "message": (
+                        "There is at least one repository that does not exist "
+                        "or is not accessible to the parent installation."
+                    )
+                },
+            )
+        )
+
+        with pytest.raises(RequestFailed) as excinfo:
+            installation_token_for(
+                creds,
+                "acme",
+                "widgets",
+                permissions={"pull_requests": "write"},
+                role="reporter",
+            )
+
+    assert not isinstance(excinfo.value, PermissionsNotGrantedError)
+
+
+def test_installation_token_for_quotes_githubs_permission_message(
+    rsa_private_key: str,
+) -> None:
+    """The remediation is ours, but GitHub's own wording rides along so the
+    real cause is never hidden behind our guess at it."""
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+    github_message = "The permissions requested are not granted to this installation."
+
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/installation").mock(
+            return_value=httpx.Response(200, json={"id": 999})
+        )
+        router.post("/app/installations/999/access_tokens").mock(
+            return_value=httpx.Response(422, json={"message": github_message})
+        )
+
+        with pytest.raises(PermissionsNotGrantedError) as excinfo:
+            installation_token_for(
+                creds, "acme", "widgets", permissions={"pull_requests": "write"}
+            )
+
+    assert github_message in str(excinfo.value)
+    assert excinfo.value.detail == github_message
+
+
+def test_installation_token_for_handles_a_non_json_422(
+    rsa_private_key: str,
+) -> None:
+    """An error body isn't guaranteed to be JSON; reading the message must not
+    turn a reportable failure into a JSONDecodeError."""
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/installation").mock(
+            return_value=httpx.Response(200, json={"id": 999})
+        )
+        router.post("/app/installations/999/access_tokens").mock(
+            return_value=httpx.Response(422, text="<html>gateway said no</html>")
+        )
+
+        with pytest.raises(RequestFailed) as excinfo:
+            installation_token_for(
+                creds, "acme", "widgets", permissions={"pull_requests": "write"}
+            )
+
+    assert not isinstance(excinfo.value, PermissionsNotGrantedError)
+
+
 def test_installation_token_for_rejects_an_unknown_permission_name(
     rsa_private_key: str,
 ) -> None:

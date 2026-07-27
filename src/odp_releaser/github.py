@@ -105,6 +105,10 @@ class PermissionsNotGrantedError(Exception):
     permissions that the app was not granted"). The common cause is a *new*
     permission added to an existing app: every installation has to accept the
     updated permission request before tokens can carry it.
+
+    Raised only for a 422 whose message actually names permissions — see
+    :func:`_is_permissions_error`, since the same status code covers unrelated
+    problems.
     """
 
     def __init__(
@@ -114,20 +118,72 @@ class PermissionsNotGrantedError(Exception):
         permissions: dict[str, str],
         *,
         role: str = "reporter",
+        detail: str = "",
     ) -> None:
         self.owner = owner
         self.repo = repo
         self.permissions = permissions
+        self.detail = detail
         requested = ", ".join(
             f"{name}: {level}" for name, level in sorted(permissions.items())
         )
+        suffix = f" GitHub said: {detail}" if detail else ""
         super().__init__(
             f"The {role} app on {owner}/{repo} has not been granted the "
             f"permissions this token needs ({requested}). Add them to the app, "
             f"then have {owner} accept the permission request GitHub sends for "
             "the existing installation — a newly requested permission stays "
-            "inactive until the installation owner accepts it."
+            f"inactive until the installation owner accepts it.{suffix}"
         )
+
+
+def response_message(exc: RequestFailed) -> str:
+    """GitHub's own ``message`` for a failed request, or ``""``.
+
+    Defensive: an error response isn't guaranteed to be JSON, or to carry a
+    ``message`` at all.
+    """
+    try:
+        body = exc.response.json()
+    except ValueError:
+        return ""
+    if isinstance(body, dict):
+        message = body.get("message")
+        if isinstance(message, str):
+            return message
+    return ""
+
+
+def describe_request_failure(exc: RequestFailed) -> str:
+    """A reportable one-liner for a ``RequestFailed``.
+
+    ``str(RequestFailed)`` is githubkit's repr of the response object
+    (``Response(422 Unprocessable Entity, data_model=...)``), which tells a
+    workflow log nothing about what GitHub objected to. This puts the status and
+    GitHub's own message in front of whoever has to fix it.
+    """
+    status = exc.response.status_code
+    message = response_message(exc)
+    return (
+        f"GitHub returned {status}: {message}"
+        if message
+        else f"GitHub returned {status}"
+    )
+
+
+def _is_permissions_error(exc: RequestFailed) -> bool:
+    """Whether a 422 from the token mint is about ungranted permissions.
+
+    ``create_installation_access_token`` answers 422 for more than one reason —
+    notably a ``repositories`` entry that doesn't exist or isn't accessible to
+    the installation, which happens when a source repo is renamed or
+    transferred. Telling someone to go accept a permission request they already
+    accepted would send them the wrong way, so the specific advice is gated on
+    GitHub's message mentioning permissions at all. Anything else stays a plain
+    ``RequestFailed``, which callers already report with GitHub's own wording —
+    so a reworded message degrades to the raw error rather than to bad advice.
+    """
+    return "permission" in response_message(exc).lower()
 
 
 def _check_permissions(permissions: dict[str, str]) -> None:
@@ -289,7 +345,9 @@ def installation_token_for(
     Asking for a permission the app doesn't hold is a 422 rather than a
     silently narrower token, and is raised as
     :class:`PermissionsNotGrantedError` — the expected failure while a source
-    org has yet to accept a newly added permission.
+    org has yet to accept a newly added permission. Other 422s (an
+    inaccessible or renamed repository, say) stay plain ``RequestFailed``; see
+    :func:`_is_permissions_error`.
     """
     if permissions is None:
         permissions = DEFAULT_TOKEN_PERMISSIONS
@@ -318,12 +376,16 @@ def installation_token_for(
                 },
             )
         except RequestFailed as exc:
-            if exc.response.status_code == 422:
+            if exc.response.status_code == 422 and _is_permissions_error(exc):
                 raise PermissionsNotGrantedError(
-                    owner, repo, permissions, role=role
+                    owner,
+                    repo,
+                    permissions,
+                    role=role,
+                    detail=response_message(exc),
                 ) from exc
             raise
-    token: str = response.json()["token"]
+        token: str = response.json()["token"]
     return token
 
 
@@ -495,7 +557,7 @@ def upsert_pr_comment(
     page of a busy pull request would otherwise be missed and duplicated.
     Returns the comment's ``html_url``.
 
-    Needs a token with ``pull-requests: write``; a pull request that can't be
+    Needs a token with ``pull_requests: write``; a pull request that can't be
     commented on (locked, archived repository) surfaces as ``RequestFailed``
     for the caller to report.
     """
@@ -527,5 +589,5 @@ def upsert_pr_comment(
             response = github.rest.issues.create_comment(
                 owner, name, pr_number, data={"body": body}
             )
-    comment_url: str = response.json()["html_url"]
+        comment_url: str = response.json()["html_url"]
     return comment_url

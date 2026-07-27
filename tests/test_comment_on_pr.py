@@ -389,6 +389,31 @@ def test_comment_requires_exactly_one_of_payload_or_pr_body(
     assert "exactly one" in output
 
 
+def test_comment_rejects_an_unknown_update_mode(
+    tmp_path: Path, rsa_private_key: str
+) -> None:
+    """A mis-plumbed workflow input must fail, not fall through to `deployed`.
+
+    Announcing "deployed" for a bump that is only staged is worse than not
+    commenting, so the value is an enum Typer validates rather than a string
+    compared against `"pull_request"`.
+    """
+    runner = typer.testing.CliRunner()
+
+    with respx.mock(base_url=API) as router:
+        result = runner.invoke(
+            app,
+            ["comment"],
+            env=_env(tmp_path, rsa_private_key, UPDATE_MODE="deployed"),
+        )
+
+    assert result.exit_code != 0
+    output = result.output or result.stderr
+    assert "commit" in output
+    assert "pull_request" in output
+    assert not router.calls
+
+
 def test_comment_reports_an_ungranted_permission(
     tmp_path: Path, rsa_private_key: str
 ) -> None:
@@ -401,7 +426,15 @@ def test_comment_reports_an_ungranted_permission(
             return_value=httpx.Response(200, json={"id": 555})
         )
         router.post("/app/installations/555/access_tokens").mock(
-            return_value=httpx.Response(422, json={"message": "not granted"})
+            return_value=httpx.Response(
+                422,
+                json={
+                    "message": (
+                        "The permissions requested are not granted to this "
+                        "installation."
+                    )
+                },
+            )
         )
 
         result = runner.invoke(app, ["comment"], env=_env(tmp_path, rsa_private_key))
@@ -410,6 +443,42 @@ def test_comment_reports_an_ungranted_permission(
     output = result.output or result.stderr
     assert "pull_requests" in output
     assert "accept" in output.lower()
+
+
+def test_comment_reports_an_unrelated_422_in_githubs_own_words(
+    tmp_path: Path, rsa_private_key: str
+) -> None:
+    """A renamed or transferred source repo also 422s the token mint.
+
+    Sending someone to accept a permission request they already accepted would
+    waste their time, so this path reports what GitHub actually said instead.
+    """
+    runner = typer.testing.CliRunner()
+
+    with respx.mock(base_url=API) as router:
+        router.get(f"/repos/{SOURCE_REPO}/installation").mock(
+            return_value=httpx.Response(200, json={"id": 555})
+        )
+        router.post("/app/installations/555/access_tokens").mock(
+            return_value=httpx.Response(
+                422,
+                json={
+                    "message": (
+                        "There is at least one repository that does not exist "
+                        "or is not accessible to the parent installation."
+                    )
+                },
+            )
+        )
+
+        result = runner.invoke(app, ["comment"], env=_env(tmp_path, rsa_private_key))
+
+    assert result.exit_code == 1
+    output = result.output or result.stderr
+    assert "not accessible to the parent installation" in output
+    assert "422" in output
+    # No misdirection towards a permission request that isn't the problem.
+    assert "accept the permission request" not in output
 
 
 def test_comment_reports_a_forbidden_pull_request(

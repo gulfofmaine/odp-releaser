@@ -26,7 +26,6 @@ Secrets (tokens and private keys) are never logged.
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Annotated
 
 import typer
@@ -42,18 +41,15 @@ from odp_releaser.github_output import write_step_summary
 from odp_releaser.logger import logger
 from odp_releaser.report_inputs import (
     REPORTING_ERRORS,
+    UpdateMode,
+    describe_error,
     reporter_token,
     resolve_source_inputs,
     skip,
 )
 from odp_releaser.report_inputs import fail as _fail
 
-
-class UpdateMode(StrEnum):
-    """How the bump landed in the deploy repo (``bump-images`` step output)."""
-
-    commit = "commit"  # pylint: disable=invalid-name
-    pull_request = "pull_request"  # pylint: disable=invalid-name
+__all__ = ["UpdateMode", "report_deployment"]
 
 
 def report_deployment(
@@ -187,7 +183,7 @@ def report_deployment(
             description=description,
         )
     except REPORTING_ERRORS as exc:
-        _fail(f"Failed to report deployment to {payload.repo}: {exc}")
+        _fail(f"Failed to report deployment to {payload.repo}: {describe_error(exc)}")
 
     message = (
         f"Reported `{state}` deployment of `{payload.image_name}:"
