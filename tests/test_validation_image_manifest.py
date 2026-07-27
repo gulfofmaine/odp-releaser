@@ -34,7 +34,10 @@ E2E_CONFIG = Path(__file__).parent / "e2e" / "image_manifest.yaml"
 
 def _write(tmp_path: Path, text: str, name: str = "image_manifest.yaml") -> Path:
     path = tmp_path / name
-    path.write_text(text)
+    # Explicit encoding, like everything in odp_releaser that touches a config
+    # file: `write_text` otherwise uses the platform's locale encoding, so a
+    # fixture containing anything outside cp1252 fails on Windows only.
+    path.write_text(text, encoding="utf-8")
     return path
 
 

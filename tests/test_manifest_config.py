@@ -262,6 +262,27 @@ def test_resolve_comment_config_empty_template_is_not_treated_as_unset() -> None
     assert resolved.deployed == DEFAULT_DEPLOYED_TEMPLATE
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(DEFAULT_STAGED_TEMPLATE, id="staged-template"),
+        pytest.param(DEFAULT_DEPLOYED_TEMPLATE, id="deployed-template"),
+        pytest.param(ManifestConfig.generate_yaml(), id="generated-example-config"),
+    ],
+)
+def test_shipped_config_text_survives_a_narrow_locale(text: str) -> None:
+    """Everything we ship into stdout has to encode outside UTF-8.
+
+    `odp-releaser generate-config image-manifest > image_manifest.yaml` is the
+    documented way to start a config, and on Windows that redirect encodes
+    stdout with the locale code page rather than UTF-8 -- so a single emoji in a
+    default template took the command down with a UnicodeEncodeError there while
+    passing everywhere else. A user's own override can contain whatever their
+    platform handles; what ships cannot.
+    """
+    text.encode("cp1252")
+
+
 def test_builtin_templates_only_use_always_populated_placeholders() -> None:
     """The built-ins must never render a half-empty link or a dangling '@'.
 

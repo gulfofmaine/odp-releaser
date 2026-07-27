@@ -120,12 +120,22 @@ class FileManifest(BaseModel):
 
 
 # The comment bodies `odp-releaser comment` posts back on the source pull
-# request when a config doesn't override them. Deliberately restricted to
-# placeholders that are always populated (see the test in
-# tests/test_manifest_config.py): `environment_url` can resolve to an empty
-# string at bump time, which would render a dangling markdown link here.
+# request when a config doesn't override them.
+#
+# Two deliberate constraints, both covered by tests in
+# tests/test_manifest_config.py:
+#
+# - Only placeholders that are always populated. `environment_url` can resolve
+#   to an empty string at bump time, which would render a dangling markdown
+#   link here.
+# - ASCII only. These strings reach stdout through `generate-config
+#   image-manifest`, and a Windows shell redirecting that to a file encodes it
+#   with the locale code page (cp1252), which raises on anything outside it. A
+#   user's own override is their own business -- their platform, their choice --
+#   but what ships has to survive `generate-config > image_manifest.yaml`
+#   everywhere.
 DEFAULT_STAGED_TEMPLATE = """\
-### 📦 `{image_name}` staged for `{environment}`
+### `{image_name}` staged for `{environment}`
 
 Tag `{new_tag}` is staged in [`{deploy_repo}`]({bump_url}) and is waiting on \
 review before it deploys.
@@ -133,7 +143,7 @@ review before it deploys.
 <sub>Bumped by [odp-releaser]({run_url}) from `{git_sha}`.</sub>"""
 
 DEFAULT_DEPLOYED_TEMPLATE = """\
-### 🚀 `{image_name}` deployed to `{environment}`
+### `{image_name}` deployed to `{environment}`
 
 Tag `{new_tag}` landed in [`{deploy_repo}`]({bump_url}).
 
@@ -536,7 +546,7 @@ EXAMPLE_MANIFEST = ManifestConfig(
         # round-trip through this example as quoted scalars with escaped
         # newlines, which reads badly in the generated docs.
         comment=CommentConfig(
-            deployed="🚀 `{image_name}` `{new_tag}` deployed to `{environment}`",
+            deployed="`{image_name}` `{new_tag}` deployed to `{environment}`",
         ),
         reviewers=["abkfenris"],
         team_reviewers=["deployers"],
@@ -580,7 +590,7 @@ EXAMPLE_MANIFEST = ManifestConfig(
                 # here because it would never be reached: this config commits
                 # directly, and a direct commit is reported as deployed at once.
                 comment=CommentConfig(
-                    deployed="📦 `{image_name}` `{new_tag}` is live on dev",
+                    deployed="`{image_name}` `{new_tag}` is live on dev",
                 ),
                 kustomize_manifests=[
                     KustomizeManifest(
