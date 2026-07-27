@@ -12,7 +12,11 @@ from odp_releaser.bump_image_tester import (
 )
 from odp_releaser.manifests.helm import dagster_deployment_path
 from odp_releaser.manifests.kustomize import image_pin_path
-from odp_releaser.schemas.manifest_config import ConfigDefaults, ImageConfig
+from odp_releaser.schemas.manifest_config import (
+    ConfigDefaults,
+    ImageConfig,
+    ManifestConfig,
+)
 from odp_releaser.validation.diagnostics import Diagnostics, Severity
 from odp_releaser.validation.image_manifest import (
     TEMPLATE_KEYS,
@@ -239,6 +243,37 @@ images:
 def test_e2e_manifest_has_zero_diagnostics() -> None:
     diagnostics = validate_image_manifest(E2E_CONFIG)
     assert diagnostics.diagnostics == ()
+
+
+def test_generated_example_manifest_has_no_new_diagnostics(tmp_path: Path) -> None:
+    """The documented example must not demonstrate something we warn about.
+
+    ``odp-releaser generate-config image-manifest`` is what users copy from, and
+    it is rendered verbatim into the docs. Nothing validated it end to end
+    before -- the neighbouring example test only checks for unknown keys -- so a
+    new check could start flagging the project's own example with no test
+    noticing. ``check_files=False`` because the example's manifest paths are
+    illustrative and don't exist on disk.
+
+    The one tolerated warning is pre-existing and predates comment support: the
+    example sets ``reviewers``/``team_reviewers`` under ``defaults:``, which
+    ``_check_unused_reviewers`` then reports against the commit-mode ``push``
+    config that inherits them. Whether that check should look at inherited
+    values at all is a separate question from this test; asserting the exact set
+    means any *additional* diagnostic fails here, and fixing the existing one
+    fails here too so this list gets updated deliberately.
+    """
+    path = _write(tmp_path, ManifestConfig.generate_yaml())
+
+    diagnostics = validate_image_manifest(path, check_files=False)
+
+    assert _messages(diagnostics) == [
+        "reviewers/team_reviewers are set but update_mode resolves to 'commit' "
+        "for event 'push' on image 'gmri/neracoos-mariners-dashboard'; only "
+        "pull_request mode ever requests reviewers, so these are never used"
+    ]
+    # Nothing comment-related, which is what this change is on the hook for.
+    assert not any("comment" in message for message in _messages(diagnostics))
 
 
 def test_dagster_helm_kustomize_fixture_is_clean() -> None:
@@ -1341,6 +1376,38 @@ images:
     assert any(
         "never carries a source pull request" in d.message for d in diagnostics.warnings
     )
+
+
+def test_a_defaults_level_comment_does_not_warn_on_a_release_config(
+    tmp_path: Path,
+) -> None:
+    """A repo-wide comment default spans images with different events.
+
+    Some of them firing on `release` is normal, so flagging each one for not
+    using part of a perfectly good default is noise -- the warning is for a
+    comment written on the config itself.
+    """
+    _kustomization(tmp_path)
+    path = _write(
+        tmp_path,
+        """
+defaults:
+  comment:
+    staged: repo-wide staged {image_name}
+    deployed: repo-wide deployed {new_tag}
+images:
+  gmri/app:
+    - events: [release]
+      kustomize_manifests:
+        - path: ./kustomization.yaml
+          set:
+            /images[0]/newTag: "{new_tag}"
+""",
+    )
+
+    diagnostics = validate_image_manifest(path)
+
+    assert diagnostics.diagnostics == (), _messages(diagnostics)
 
 
 def test_inherited_default_comment_does_not_warn_on_a_release_config(

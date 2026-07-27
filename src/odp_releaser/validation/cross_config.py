@@ -228,31 +228,37 @@ def _check_unusable_comment(
     location: ConfigLocation,
     diagnostics: Diagnostics,
 ) -> None:
-    """Warn when a *deliberately configured* comment can never be posted.
+    """Warn when a comment written on *this config* can never be posted.
 
-    Both checks are deliberately scoped to comment settings someone wrote down.
-    Commenting is on by default with built-in templates, so warning about the
-    resolved value would fire on every release-only or commit-mode config in
-    every existing manifest -- describing the shipped default, not a mistake.
-    An explicit setting, on the other hand, expresses an intent that these two
-    situations silently defeat:
+    Both checks look only at ``comment`` set on the image configs themselves,
+    never at what they inherit. Two levels of inheritance would each produce
+    noise if followed:
+
+    - Commenting is on by default with built-in templates, so judging the
+      resolved value would fire on every release-only or commit-mode config in
+      every existing manifest -- describing the shipped default, not a mistake.
+    - A ``defaults:``-level ``comment`` is by design a broad brush across images
+      with different events and update modes. Some of those images firing on
+      ``release`` is normal, and flagging each one for not using a repo-wide
+      default would punish a perfectly good default.
+
+    A config that spells out ``comment:`` itself, though, is making a claim
+    about *that* config, and these two situations silently defeat it:
 
     - The event carries no source pull request. ``make_payload`` only resolves
       one for ``push`` events, so a release-only or workflow_dispatch-only
       config has nothing to comment on no matter what its templates say.
-    - An explicit ``staged`` template can never be reached, because
-      ``update_mode`` resolves to ``commit`` for this event and a direct commit
-      is reported as deployed immediately. This mirrors
-      :func:`_check_unused_reviewers`, including its reason for resolving
-      ``update_mode`` across the whole matching group rather than per config.
+    - Its ``staged`` template can never be reached, because ``update_mode``
+      resolves to ``commit`` for this event and a direct commit is reported as
+      deployed immediately. This mirrors :func:`_check_unused_reviewers`,
+      including its reason for resolving ``update_mode`` across the whole
+      matching group rather than per config.
     """
     configured = [
         image_config.comment
         for image_config in matching
         if image_config.comment is not None
     ]
-    if defaults.comment is not None:
-        configured.append(defaults.comment)
     if not configured:
         return
 

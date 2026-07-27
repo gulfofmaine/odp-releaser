@@ -550,9 +550,6 @@ EXAMPLE_MANIFEST = ManifestConfig(
                 update_mode="pull_request",
                 environment="production",
                 environment_url="https://mariners.neracoos.org",
-                comment=CommentConfig(
-                    staged="📦 `{image_name}` `{new_tag}` staged in {bump_url}",
-                ),
                 reviewers=["abkfenris"],
                 team_reviewers=["mariners"],
                 kustomize_manifests=[
@@ -577,6 +574,14 @@ EXAMPLE_MANIFEST = ManifestConfig(
             ),
             ImageConfig(
                 events=["push"],
+                # Overrides only `deployed`, so the defaults-level value for
+                # every other comment field still applies -- comment settings
+                # are inherited field by field. `staged` is left to the built-in
+                # here because it would never be reached: this config commits
+                # directly, and a direct commit is reported as deployed at once.
+                comment=CommentConfig(
+                    deployed="📦 `{image_name}` `{new_tag}` is live on dev",
+                ),
                 kustomize_manifests=[
                     KustomizeManifest(
                         path=Path("apps/mariners-dev/kustomization.yaml"),
