@@ -125,6 +125,51 @@ Only `push` events carry a source pull request (that's the only event
 asks for a comment it could never post. Set `enabled: false` to turn commenting
 off, or a template to `""` to post nothing in that one state.
 
+#### The built-in templates
+
+These are what you get when neither level sets a template — and a useful
+starting point for an override:
+
+```python exec="on" result="yaml"
+from odp_releaser.schemas.manifest_config import (
+    DEFAULT_DEPLOYED_TEMPLATE,
+    DEFAULT_STAGED_TEMPLATE,
+)
+
+print("comment:")
+for field, template in (
+    ("staged", DEFAULT_STAGED_TEMPLATE),
+    ("deployed", DEFAULT_DEPLOYED_TEMPLATE),
+):
+    print(f"  {field}: |")
+    for line in template.splitlines():
+        print(f"    {line}".rstrip())
+```
+
+Rendered against a real bump, the `deployed` one comes out as:
+
+```python exec="on" result="markdown" source="above"
+from odp_releaser.bump_image_tester import EventType, load_client_payload
+from odp_releaser.comment_body import CommentState, build_context, render_comment
+from odp_releaser.schemas.manifest_config import DEFAULT_DEPLOYED_TEMPLATE
+
+payload = load_client_payload(EventType.push)
+context = build_context(
+    payload,
+    deploy_repo="gulfofmaine/deploy-repo",
+    environment="production",
+    environment_url=None,
+    update_mode="commit",
+    bump_url="https://github.com/gulfofmaine/deploy-repo/commit/9f8e7d6",
+    run_url="https://github.com/gulfofmaine/deploy-repo/actions/runs/123",
+    state=CommentState.deployed,
+)
+print(render_comment(DEFAULT_DEPLOYED_TEMPLATE, context))
+```
+
+That trailing HTML comment is the marker described above — it is invisible on
+the rendered pull request, and it is how a rerun finds the comment to update.
+
 #### Comment placeholders
 
 Comment templates are rendered with `str.format`, like `set` values — but

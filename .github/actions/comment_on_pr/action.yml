@@ -82,6 +82,14 @@ inputs:
       available to templates as `{bump_url}`.
     required: false
     default: ""
+  run_url:
+    description: >-
+      Available to templates as `{run_url}`. Empty (the default) uses this
+      workflow run, which is normally what you want; set it to point a comment
+      at a different run — e.g. the job that actually deployed, when the bump is
+      one step of a longer pipeline.
+    required: false
+    default: ""
   pr_number:
     description: >-
       Source pull request to comment on (the `comment_pr_number` output of
@@ -144,6 +152,7 @@ runs:
         ENVIRONMENT: ${{ inputs.environment }}
         ENVIRONMENT_URL: ${{ inputs.environment_url }}
         BUMP_URL: ${{ inputs.bump_url }}
+        RUN_URL: ${{ inputs.run_url }}
         COMMENT_PR_NUMBER: ${{ inputs.pr_number }}
         COMMENT_ENABLED: ${{ inputs.comment_enabled }}
         COMMENT_STAGED_TEMPLATE: ${{ inputs.staged_template }}

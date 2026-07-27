@@ -306,6 +306,7 @@ does) when commenting should be best-effort.
 | `environment` | no | `""` | Environment named in the comment, and part of the comment's identity. An environment embedded in `pr_body` wins; empty falls back to the deploy repo's `owner/name` slug. |
 | `environment_url` | no | `""` | Available to templates as `{environment_url}`. A URL embedded in `pr_body` wins; empty falls back to `bump_url`. |
 | `bump_url` | no | `""` | Where the bump lives — the bump commit or pull request URL — available to templates as `{bump_url}`. |
+| `run_url` | no | `""` | Available to templates as `{run_url}`. Empty uses this workflow run; set it to point at a different one. |
 | `pr_number` | no | `""` | Source pull request to comment on (`bump_images`' `comment_pr_number` output). Empty falls back to the payload's own pull request; none at all is a no-op. |
 | `comment_enabled` | no | `"true"` | Whether to comment at all (`bump_images`' `comment_enabled` output). `"false"` is a no-op. |
 | `staged_template` | no | `""` | Comment body for a `pull_request`-mode bump. A template embedded in `pr_body` wins. |
