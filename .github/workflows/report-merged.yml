@@ -6,6 +6,8 @@
 # report metadata that `bump-images` embedded in the PR body and re-runs
 # `odp-releaser report-deployment`, which finds the queued deployment on the
 # source repo (same commit + environment) and flips its status to `success`.
+# It then re-runs `odp-releaser comment` the same way, so the source pull
+# request's `staged` comment is rewritten as `deployed`.
 #
 # A closed PR without embedded odp-releaser metadata is a friendly no-op, but
 # gate the job on merged bump PRs anyway (see the caller example) so the job
@@ -90,6 +92,28 @@ jobs:
           # Fallback "View deployment" link; an environment_url embedded in
           # the PR body at bump time wins over this.
           environment_url:
+            ${{ github.server_url }}/${{ github.repository }}/commit/${{
+            github.event.pull_request.merge_commit_sha }}
+          verbosity: ${{ inputs.verbosity }}
+          reporter_apps: ${{ secrets.reporter_apps }}
+          reporter_app_id: ${{ secrets.reporter_app_id }}
+          reporter_app_private_key: ${{ secrets.reporter_app_private_key }}
+
+      - name: Flip the source pull request comment to deployed
+        # Best effort: this is the second half of the same report, and a failed
+        # comment must not fail the run that already recorded the deployment.
+        # `update_mode: commit` because the bump has now landed — that's what
+        # selects the `deployed` template over the `staged` one. Everything else
+        # (templates, environment, source PR number) was embedded in the bump
+        # PR body, so no deploy-repo checkout is needed here either. A PR body
+        # without odp-releaser metadata, or one from a release that predates
+        # comment support, is a no-op.
+        continue-on-error: true
+        uses: ./.odp-releaser/.github/actions/comment_on_pr
+        with:
+          pr_body: ${{ github.event.pull_request.body }}
+          update_mode: commit
+          bump_url:
             ${{ github.server_url }}/${{ github.repository }}/commit/${{
             github.event.pull_request.merge_commit_sha }}
           verbosity: ${{ inputs.verbosity }}

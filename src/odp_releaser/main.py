@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 from odp_releaser.bump_image_tester import test_bump_images
 from odp_releaser.bump_images import bump_images
+from odp_releaser.comment_on_pr import comment_on_pr
 from odp_releaser.generate_config import app as generate_app
 from odp_releaser.logger import logger
 from odp_releaser.make_payload import make_payload
@@ -53,6 +54,7 @@ app.add_typer(validate_app, name="validate")
 app.command()(notify)
 app.command()(bump_images)
 app.command(name="report-deployment")(report_deployment)
+app.command(name="comment")(comment_on_pr)
 
 app_test = typer.Typer(
     no_args_is_help=True,

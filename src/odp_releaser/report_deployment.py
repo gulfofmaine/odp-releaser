@@ -26,44 +26,30 @@ Secrets (tokens and private keys) are never logged.
 
 from __future__ import annotations
 
-import json
-from enum import StrEnum
-from typing import Annotated, NoReturn
+from typing import Annotated
 
 import typer
-from githubkit.exception import RequestFailed
-from pydantic import ValidationError
 
 from odp_releaser.cli_options import GitHubRepository, GitHubRunId, GitHubServerUrl
 from odp_releaser.github import (
-    AppNotInstalledError,
     DeploymentState,
-    MissingCredentialsError,
     create_deployment,
     create_deployment_status,
-    installation_token_for,
     list_deployments,
-    resolve_reporter_credentials,
 )
 from odp_releaser.github_output import write_step_summary
 from odp_releaser.logger import logger
-from odp_releaser.report_metadata import extract_metadata
-from odp_releaser.schemas.client_payload import ClientPayload
+from odp_releaser.report_inputs import (
+    REPORTING_ERRORS,
+    UpdateMode,
+    describe_error,
+    reporter_token,
+    resolve_source_inputs,
+    skip,
+)
+from odp_releaser.report_inputs import fail as _fail
 
-
-class UpdateMode(StrEnum):
-    """How the bump landed in the deploy repo (``bump-images`` step output)."""
-
-    commit = "commit"  # pylint: disable=invalid-name
-    pull_request = "pull_request"  # pylint: disable=invalid-name
-
-
-def _fail(message: str) -> NoReturn:
-    """Log, summarize, and echo ``message``, then exit non-zero."""
-    logger.error(message)
-    write_step_summary(message)
-    typer.echo(message, err=True)
-    raise typer.Exit(1)
+__all__ = ["UpdateMode", "report_deployment"]
 
 
 def report_deployment(
@@ -141,58 +127,26 @@ def report_deployment(
     environment = environment or None
     environment_url = environment_url or None
 
-    if (client_payload is None) == (pr_body is None):
-        _fail(
-            "Provide exactly one of the client payload (argument or "
-            "CLIENT_PAYLOAD) or --pr-body."
+    payload, metadata = resolve_source_inputs(client_payload, pr_body)
+    if payload is None:
+        skip(
+            "No odp-releaser report metadata found in the pull request "
+            "body; nothing to report."
         )
-
-    if pr_body is not None:
-        try:
-            metadata = extract_metadata(pr_body)
-        except (json.JSONDecodeError, ValidationError) as exc:
-            _fail(
-                "Malformed odp-releaser report metadata in the pull request "
-                f"body: {exc}"
-            )
-        if metadata is None:
-            message = (
-                "No odp-releaser report metadata found in the pull request "
-                "body; nothing to report."
-            )
-            logger.info(message)
-            write_step_summary(message)
-            typer.echo(message)
-            return
-        payload = metadata.client_payload
+        return
+    if metadata is not None:
         # Values recorded at bump time carry the manifest config's intent, so
         # they win over the calling workflow's generic fallbacks.
         environment = metadata.environment or environment
         environment_url = metadata.environment_url or environment_url
-    else:
-        assert client_payload is not None  # narrowed by the exactly-one check
-        try:
-            payload = ClientPayload.model_validate_json(client_payload)
-        except ValidationError as exc:
-            logger.error("%s", exc)
-            typer.echo(str(exc), err=True)
-            raise typer.Exit(1) from exc
 
     environment = environment or github_repository
-    owner, _, name = payload.repo.partition("/")
     state: DeploymentState = "success" if update_mode is UpdateMode.commit else "queued"
     log_url = f"{github_server_url}/{github_repository}/actions/runs/{github_run_id}"
     description = f"{payload.image_name}:{payload.new_tag()} in {github_repository}"
 
     try:
-        creds = resolve_reporter_credentials(owner)
-        token = installation_token_for(
-            creds,
-            owner,
-            name,
-            permissions={"deployments": "write"},
-            role="reporter",
-        )
+        token = reporter_token(payload.repo, permissions={"deployments": "write"})
         existing = list_deployments(
             payload.repo,
             sha=payload.git_sha,
@@ -228,8 +182,8 @@ def report_deployment(
             log_url=log_url,
             description=description,
         )
-    except (MissingCredentialsError, AppNotInstalledError, RequestFailed) as exc:
-        _fail(f"Failed to report deployment to {payload.repo}: {exc}")
+    except REPORTING_ERRORS as exc:
+        _fail(f"Failed to report deployment to {payload.repo}: {describe_error(exc)}")
 
     message = (
         f"Reported `{state}` deployment of `{payload.image_name}:"

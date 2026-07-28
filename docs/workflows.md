@@ -45,6 +45,10 @@ sequenceDiagram
         Deploy->>Source: deployment + status at built commit
         Deploy->>Source: bump PR merge flips queued deployment to success
     end
+    opt reporter app also granted Pull requests: write
+        Deploy->>Source: comment on the source PR (staged / deployed)
+        Deploy->>Source: bump PR merge rewrites staged as deployed
+    end
     Deploy->>Argo: new manifests available
     Argo->>Argo: sync manifests to the cluster
 ```
@@ -235,6 +239,10 @@ succession.
 | `pr_title` | Title for the bump pull request. |
 | `reviewers` | Comma-separated GitHub usernames requested as reviewers on the bump pull request; empty when none are configured. |
 | `team_reviewers` | Comma-separated GitHub team slugs requested as reviewers on the bump pull request; empty when none are configured. |
+| `comment_enabled` | Whether commenting back on the source pull request is enabled for this image (`"true"`/`"false"`). |
+| `comment_pr_number` | Source pull request the comment lands on; empty for events that carry no pull request (`release`, `workflow_dispatch`). |
+| `comment_staged_template` | Resolved comment template for a bump pull request awaiting review, unrendered. |
+| `comment_deployed_template` | Resolved comment template for a landed bump, unrendered. |
 
 Follow-up jobs in the calling workflow can consume these, e.g.:
 
@@ -322,6 +330,28 @@ write` installed on the source repos — normally a single app owned by the
 deploy org and installed by each source org. See
 [GitHub Apps](github_apps.md#reporter-apps) for how to set one up.
 
+### Commenting on the source pull request
+
+If that same reporter app has additionally been granted `Pull requests: Read
+and write`, the [`comment_on_pr` composite action](actions.md#comment_on_pr)
+runs after the deployment report and posts a comment on the source pull
+request naming the image, the tag and the environment in words — the readable
+counterpart to the deployment record.
+
+- The **state** decides which template is used: `staged` for a
+  `pull_request`-mode bump still awaiting review, `deployed` for one that has
+  landed. Calling [`report-merged.yml`](#report-merged) rewrites the staged
+  comment as deployed when the bump PR merges.
+- The **templates** come from the image manifest config, inherited field by
+  field from `defaults:` and then the built-ins — see
+  [Pull request comments](config/image_manifest.md#pull-request-comments).
+- The step is **skipped entirely** when commenting is disabled for the image,
+  or when the event carried no source pull request (only `push` events do), and
+  is otherwise **best-effort** like the deployment report.
+- The comment token is minted **separately** from the deployment one, with
+  `pull_requests: write` only, so a source org that hasn't accepted the comment
+  permission keeps receiving deployment reports.
+
 ### The `ci_app_*` PR-CI-triggering note
 
 GitHub Actions deliberately does not trigger further workflow runs from a
@@ -340,12 +370,22 @@ Runs in the **deploy** repo when a pull request closes. A `pull_request`-mode
 bump reports its deployment to the source repo as `queued` — nothing is live
 until the bump PR merges. This workflow un-queues it: it reads the report
 metadata that `bump-images` embedded in the PR body (an invisible HTML
-comment carrying the client payload, environment, and environment URL),
-finds the queued deployment on the source repo for the same commit and
-environment, and flips its status to `success`.
+comment carrying the client payload, environment, environment URL, and the
+resolved comment templates), finds the queued deployment on the source repo
+for the same commit and environment, and flips its status to `success`. It
+then rewrites the source pull request's `staged` comment as `deployed`, if
+commenting is configured.
+
+Everything it needs travels in that PR body, which is why this workflow never
+checks out the deploy repo and never reads the image manifest.
 
 Deploy repos whose images all use `update_mode: commit` don't need this
-workflow — commit-mode bumps report `success` immediately.
+workflow — commit-mode bumps report `success` and comment `deployed`
+immediately.
+
+One gap worth knowing: a bump pull request **closed without merging** leaves
+its `staged` comment (and `queued` deployment) as they are, since this workflow
+only ever runs for merged PRs.
 
 ### Caller example
 

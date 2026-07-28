@@ -11,6 +11,7 @@ from odp_releaser.github import (
     AppNotInstalledError,
     AppNotInstalledOnOrgError,
     MissingCredentialsError,
+    PermissionsNotGrantedError,
     create_deployment,
     create_deployment_status,
     installation_token_for,
@@ -495,6 +496,280 @@ def test_send_dispatch_full_flow(
     assert body["client_payload"] == client_payload
 
 
-def test_upsert_pr_comment_not_implemented() -> None:
-    with pytest.raises(NotImplementedError):
-        upsert_pr_comment("acme/widgets", 1, "hi", "gh_token")
+# --- upsert_pr_comment --------------------------------------------------------
+
+MARKER = "<!-- odp-releaser:comment key=acme/deploy|ghcr.io/acme/widget|prod -->"
+
+
+def _comment(comment_id: int, body: str) -> dict[str, object]:
+    return {
+        "id": comment_id,
+        "body": body,
+        "html_url": f"https://github.com/acme/widgets/pull/7#issuecomment-{comment_id}",
+    }
+
+
+def test_upsert_pr_comment_creates_when_no_marker_matches() -> None:
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/issues/7/comments").mock(
+            return_value=httpx.Response(
+                200, json=[_comment(1, "unrelated human comment")]
+            )
+        )
+        create = router.post("/repos/acme/widgets/issues/7/comments").mock(
+            return_value=httpx.Response(201, json=_comment(2, "new"))
+        )
+
+        url = upsert_pr_comment(
+            "acme/widgets", 7, f"body\n\n{MARKER}", "gh_token", marker=MARKER
+        )
+
+    assert url == "https://github.com/acme/widgets/pull/7#issuecomment-2"
+    assert json.loads(create.calls.last.request.content) == {
+        "body": f"body\n\n{MARKER}"
+    }
+
+
+def test_upsert_pr_comment_updates_the_comment_carrying_its_marker() -> None:
+    with respx.mock(base_url=API, assert_all_called=False) as router:
+        router.get("/repos/acme/widgets/issues/7/comments").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    _comment(1, "unrelated"),
+                    _comment(55, f"stale body\n\n{MARKER}"),
+                ],
+            )
+        )
+        update = router.patch("/repos/acme/widgets/issues/comments/55").mock(
+            return_value=httpx.Response(200, json=_comment(55, "fresh"))
+        )
+        create = router.post("/repos/acme/widgets/issues/7/comments")  # must not fire
+
+        url = upsert_pr_comment(
+            "acme/widgets", 7, f"fresh\n\n{MARKER}", "gh_token", marker=MARKER
+        )
+
+    assert url == "https://github.com/acme/widgets/pull/7#issuecomment-55"
+    assert json.loads(update.calls.last.request.content) == {
+        "body": f"fresh\n\n{MARKER}"
+    }
+    assert not create.called
+
+
+def test_upsert_pr_comment_ignores_a_sibling_deploy_repos_comment() -> None:
+    """Another deploy repo's (or another image's) comment must never be
+    overwritten -- that's the whole point of keying the marker."""
+    other = "<!-- odp-releaser:comment key=acme/other|ghcr.io/acme/widget|prod -->"
+
+    with respx.mock(base_url=API, assert_all_called=False) as router:
+        router.get("/repos/acme/widgets/issues/7/comments").mock(
+            return_value=httpx.Response(200, json=[_comment(9, f"theirs\n\n{other}")])
+        )
+        create = router.post("/repos/acme/widgets/issues/7/comments").mock(
+            return_value=httpx.Response(201, json=_comment(10, "ours"))
+        )
+        update = router.patch("/repos/acme/widgets/issues/comments/9")
+
+        upsert_pr_comment(
+            "acme/widgets", 7, f"ours\n\n{MARKER}", "gh_token", marker=MARKER
+        )
+
+    assert create.called
+    assert not update.called
+
+
+def test_upsert_pr_comment_pages_through_a_busy_pull_request() -> None:
+    """The issue-comments endpoint has no sort/filter, so a marker on a later
+    page must still be found rather than duplicated.
+
+    Paging follows the ``Link: rel="next"`` header, exactly as GitHub drives it.
+    """
+    page_one = [_comment(index, f"chatter {index}") for index in range(1, 101)]
+    next_page = f"{API}/repos/acme/widgets/issues/7/comments?page=2&per_page=100"
+
+    with respx.mock(base_url=API) as router:
+        comments = router.get("/repos/acme/widgets/issues/7/comments").mock(
+            side_effect=[
+                httpx.Response(
+                    200, json=page_one, headers={"link": f'<{next_page}>; rel="next"'}
+                ),
+                httpx.Response(200, json=[_comment(200, f"stale\n\n{MARKER}")]),
+            ]
+        )
+        update = router.patch("/repos/acme/widgets/issues/comments/200").mock(
+            return_value=httpx.Response(200, json=_comment(200, "fresh"))
+        )
+
+        upsert_pr_comment(
+            "acme/widgets", 7, f"fresh\n\n{MARKER}", "gh_token", marker=MARKER
+        )
+
+    assert comments.call_count == 2
+    assert update.called
+
+
+def test_upsert_pr_comment_surfaces_a_forbidden_pull_request() -> None:
+    """A locked or archived source PR is a RequestFailed the caller reports as
+    a best-effort failure, not a crash inside this module."""
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/issues/7/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        router.post("/repos/acme/widgets/issues/7/comments").mock(
+            return_value=httpx.Response(403, json={"message": "Forbidden"})
+        )
+
+        with pytest.raises(RequestFailed):
+            upsert_pr_comment("acme/widgets", 7, "body", "gh_token", marker=MARKER)
+
+
+# --- installation_token_for permission escalation -----------------------------
+
+
+def test_installation_token_for_reports_ungranted_permissions(
+    rsa_private_key: str,
+) -> None:
+    """GitHub 422s when a token asks for more than the app was granted.
+
+    Commenting needs `pull_requests: write`, which existing reporter-app
+    installations have not consented to yet, so this has to arrive as an
+    actionable message rather than a bare RequestFailed.
+    """
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/installation").mock(
+            return_value=httpx.Response(200, json={"id": 999})
+        )
+        router.post("/app/installations/999/access_tokens").mock(
+            return_value=httpx.Response(
+                422,
+                json={
+                    "message": (
+                        "The permissions requested are not granted to this "
+                        "installation."
+                    )
+                },
+            )
+        )
+
+        with pytest.raises(PermissionsNotGrantedError) as excinfo:
+            installation_token_for(
+                creds,
+                "acme",
+                "widgets",
+                permissions={"pull_requests": "write"},
+                role="reporter",
+            )
+
+    message = str(excinfo.value)
+    assert "pull_requests" in message
+    assert "acme/widgets" in message
+    # Names the actual fix: the org has to accept the permission request.
+    assert "accept" in message.lower()
+    assert excinfo.value.permissions == {"pull_requests": "write"}
+
+
+def test_installation_token_for_leaves_an_unrelated_422_alone(
+    rsa_private_key: str,
+) -> None:
+    """422 covers more than ungranted permissions.
+
+    A renamed or transferred source repo makes the `repositories` entry
+    inaccessible, which is also a 422 — telling the user to accept a permission
+    request they already accepted would send them the wrong way, so that stays a
+    plain RequestFailed carrying GitHub's own message.
+    """
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/installation").mock(
+            return_value=httpx.Response(200, json={"id": 999})
+        )
+        router.post("/app/installations/999/access_tokens").mock(
+            return_value=httpx.Response(
+                422,
+                json={
+                    "message": (
+                        "There is at least one repository that does not exist "
+                        "or is not accessible to the parent installation."
+                    )
+                },
+            )
+        )
+
+        with pytest.raises(RequestFailed) as excinfo:
+            installation_token_for(
+                creds,
+                "acme",
+                "widgets",
+                permissions={"pull_requests": "write"},
+                role="reporter",
+            )
+
+    assert not isinstance(excinfo.value, PermissionsNotGrantedError)
+
+
+def test_installation_token_for_quotes_githubs_permission_message(
+    rsa_private_key: str,
+) -> None:
+    """The remediation is ours, but GitHub's own wording rides along so the
+    real cause is never hidden behind our guess at it."""
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+    github_message = "The permissions requested are not granted to this installation."
+
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/installation").mock(
+            return_value=httpx.Response(200, json={"id": 999})
+        )
+        router.post("/app/installations/999/access_tokens").mock(
+            return_value=httpx.Response(422, json={"message": github_message})
+        )
+
+        with pytest.raises(PermissionsNotGrantedError) as excinfo:
+            installation_token_for(
+                creds, "acme", "widgets", permissions={"pull_requests": "write"}
+            )
+
+    assert github_message in str(excinfo.value)
+    assert excinfo.value.detail == github_message
+
+
+def test_installation_token_for_handles_a_non_json_422(
+    rsa_private_key: str,
+) -> None:
+    """An error body isn't guaranteed to be JSON; reading the message must not
+    turn a reportable failure into a JSONDecodeError."""
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with respx.mock(base_url=API) as router:
+        router.get("/repos/acme/widgets/installation").mock(
+            return_value=httpx.Response(200, json={"id": 999})
+        )
+        router.post("/app/installations/999/access_tokens").mock(
+            return_value=httpx.Response(422, text="<html>gateway said no</html>")
+        )
+
+        with pytest.raises(RequestFailed) as excinfo:
+            installation_token_for(
+                creds, "acme", "widgets", permissions={"pull_requests": "write"}
+            )
+
+    assert not isinstance(excinfo.value, PermissionsNotGrantedError)
+
+
+def test_installation_token_for_rejects_an_unknown_permission_name(
+    rsa_private_key: str,
+) -> None:
+    """GitHub drops an unrecognized permission name and then grants the token
+    every permission the installation has, so a typo must fail loudly here
+    instead of quietly over-granting."""
+    creds = DispatchAppCredentials(app_id="123", private_key=rsa_private_key)
+
+    with pytest.raises(ValueError, match="pull-requests") as excinfo:
+        installation_token_for(
+            creds, "acme", "widgets", permissions={"pull-requests": "write"}
+        )
+
+    assert "snake_case" in str(excinfo.value)

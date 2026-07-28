@@ -28,6 +28,53 @@
       "type": "object",
       "additionalProperties": false
     },
+    "CommentConfig": {
+      "description": "Comment posted back on the source pull request when this image is bumped.\n\nEvery field is optional and inherited independently: an unset field takes\nthe ``defaults``-level value, then the built-in template. See\n:func:`resolve_comment_config`.",
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether to comment on the source pull request for this config's bumps. Unset inherits the defaults-level value, which itself defaults to true",
+          "title": "Enabled"
+        },
+        "staged": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Comment body posted while a pull_request-mode bump is open and awaiting review. May reference the comment placeholders (see the docs); escape literal braces as `{{`/`}}`. Unset inherits the defaults-level value, then the built-in template",
+          "title": "Staged"
+        },
+        "deployed": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Comment body posted once the bump has landed -- immediately for a commit-mode bump, or when the bump pull request merges. Unset inherits the defaults-level value, then the built-in template",
+          "title": "Deployed"
+        }
+      },
+      "title": "CommentConfig",
+      "type": "object",
+      "additionalProperties": false
+    },
     "ConfigDefaults": {
       "description": "Default settings for every image config; a config's own value replaces the default.",
       "properties": {
@@ -84,6 +131,18 @@
           "default": null,
           "description": "Default URL reported as the deployment's 'View deployment' link. May reference `{new_tag}`, `{git_sha}`, and `{digest}`. Overridable per image config; unset falls back to the bump commit or pull request URL",
           "title": "Environment Url"
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommentConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default comment posted back on source pull requests when images are bumped. Overridable per image config, field by field; unset falls back to the built-in templates"
         },
         "reviewers": {
           "anyOf": [
@@ -257,6 +316,18 @@
           "default": null,
           "description": "URL reported as the deployment's 'View deployment' link, e.g. where this config's app runs. May reference `{new_tag}`, `{git_sha}`, and `{digest}`. Overrides the defaults-level environment_url; unset falls back to the bump commit or pull request URL",
           "title": "Environment Url"
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommentConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Comment posted back on the source pull request for this config's bumps. Each field is inherited from the defaults-level setting independently, so overriding one template keeps the other"
         },
         "update_mode": {
           "default": "commit",

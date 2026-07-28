@@ -1,0 +1,34 @@
+# Comment-config resolution fixture for tests/test_bump_image.py.
+#
+# The push config for the dashboard overrides only `staged`, proving the
+# defaults-level `deployed` template survives a partial override (see
+# `resolve_comment_config`). Its release config exists so a release payload --
+# which carries no source pull request -- can be bumped through this same
+# config file. The `-quiet` image inherits `enabled: false`, proving commenting
+# can be switched off wholesale.
+defaults:
+  comment:
+    staged: defaults staged {image_name}
+    deployed: defaults deployed {new_tag}
+
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events:
+        - push
+      comment:
+        staged: config staged {image_name}
+      kustomize_manifests:
+        - ./kustomization.yaml
+
+    - events:
+        - release
+      kustomize_manifests:
+        - ./kustomization.yaml
+
+  gmri/neracoos-mariners-dashboard-quiet:
+    - events:
+        - push
+      comment:
+        enabled: false
+      kustomize_manifests:
+        - ./kustomization.yaml

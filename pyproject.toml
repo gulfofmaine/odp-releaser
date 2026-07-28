@@ -168,6 +168,7 @@ ignore = [
 # models resolving their field annotations at class-build time.
 "src/odp_releaser/make_payload.py" = ["TC001"]
 "src/odp_releaser/report_deployment.py" = ["TC001"]
+"src/odp_releaser/comment_on_pr.py" = ["TC001"]
 "src/odp_releaser/report_metadata.py" = ["TC001"]
 # PT028 assumes any ``test_*`` function is a pytest test; these CLI commands
 # are named ``test_notify``/``test_bump_images`` for the ``test notify``/

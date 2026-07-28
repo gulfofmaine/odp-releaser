@@ -150,6 +150,24 @@ outputs:
       Comma-separated GitHub team slugs requested as reviewers on the bump pull
       request; empty when none are configured.
     value: ${{ steps.bump.outputs.team_reviewers }}
+  comment_enabled:
+    description:
+      Whether commenting back on the source pull request is enabled for this
+      image ("true"/"false").
+    value: ${{ steps.bump.outputs.comment_enabled }}
+  comment_pr_number:
+    description:
+      Source pull request the comment lands on; empty for events that carry no
+      pull request (release, workflow_dispatch).
+    value: ${{ steps.bump.outputs.comment_pr_number }}
+  comment_staged_template:
+    description:
+      Resolved comment template for a bump pull request awaiting review,
+      unrendered.
+    value: ${{ steps.bump.outputs.comment_staged_template }}
+  comment_deployed_template:
+    description: Resolved comment template for a landed bump, unrendered.
+    value: ${{ steps.bump.outputs.comment_deployed_template }}
 
 runs:
   using: composite
