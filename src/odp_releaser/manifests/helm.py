@@ -46,11 +46,12 @@ def update_helm_values_with_payload(
     Applies any ``manifest.set`` template paths (see
     :func:`odp_releaser.manifests.helpers.apply_set_templates`).
 
-    When ``manifest.dagster_user_code`` is true, every entry in the top-level
+    When ``manifest.dagster_user_code`` is true, the entry in the top-level
     ``deployments`` list whose ``image.repository`` matches
     ``payload.image_name`` has its ``image.tag`` set to ``payload.new_tag()``.
-    If no deployment matches, a warning is logged (the chart may be listed for
-    future use) and the file is otherwise left unchanged.
+    The write uses ``mustexist=True``, so if no deployment matches, this
+    raises (mirroring the kustomize tag-pin engine, see
+    ``update_kustomize_with_payload``) instead of silently no-oping.
 
     All other content and formatting is preserved via the same ruamel
     round-trip used for kustomize manifests.
@@ -64,22 +65,14 @@ def update_helm_values_with_payload(
 
     if manifest.dagster_user_code:
         tag_path = dagster_tag_path(payload.image_name)
-        matches = list(processor.get_nodes(tag_path, mustexist=False))
-        if matches:
-            message = set_value(
-                processor,
-                tag_path,
-                payload.new_tag(),
-                mustexist=True,
-                value_format=YAMLValueFormats.DQUOTE,
-            )
-            helm_message.append(f"  - {message}")
-        else:
-            logger.warning(
-                f"No dagster deployment in {values_path} has an "
-                f"image.repository of '{payload.image_name}'; leaving "
-                "deployments unchanged"
-            )
+        message = set_value(
+            processor,
+            tag_path,
+            payload.new_tag(),
+            mustexist=True,
+            value_format=YAMLValueFormats.DQUOTE,
+        )
+        helm_message.append(f"  - {message}")
 
     stream = StringIO()
 

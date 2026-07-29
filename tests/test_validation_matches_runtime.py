@@ -184,11 +184,11 @@ images:
 
 
 def _write_helm_no_matching_deployment_case(tmp_path: Path) -> Path:
-    """Agreement case with no error either side: helm only *warns* when nothing matches.
+    """Agreement case where both sides error: no dagster deployment matches.
 
-    ``update_helm_values_with_payload`` logs a warning and leaves the file
-    alone, so the validator must not call this an error -- but the run also
-    changes nothing, which is why this case expects ``changed`` to be false.
+    ``update_helm_values_with_payload`` sets the tag with ``mustexist=True``,
+    which raises when no deployment entry matches -- so the validator must
+    call this an error too.
     """
     (tmp_path / "values.yaml").write_text(
         """\
@@ -388,9 +388,8 @@ CASES = [
         "synthetic-helm-no-matching-deployment",
         "gmri/app",
         EventType.push,
-        expect_error=False,
+        expect_error=True,
         build=_write_helm_no_matching_deployment_case,
-        expect_changed=False,
     ),
     Case(
         "synthetic-helm-selector-does-not-resolve",
