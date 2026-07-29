@@ -33,18 +33,18 @@ You can set up a development environment by running:
 uv sync
 ```
 
-# Pre-commit
+# Pre-commit (via Prek)
 
-You should prepare pre-commit or prek, which will help you by checking that
-commits pass required checks:
+You should prepare prek, which will help you by checking that commits pass
+required checks:
 
 ```bash
-uv tool install pre-commit # or brew install pre-commit on macOS
-pre-commit install # Will install a pre-commit hook into the git repo
+uv tool install prek # or brew install prek on macOS
+prek install # Will install a pre-commit hook into the git repo
 ```
 
-You can also/alternatively run `pre-commit run` (changes only) or
-`pre-commit run --all-files` to check even without installing the hook.
+You can also/alternatively run `prek run` (changes only) or
+`prek run --all-files` to check even without installing the hook.
 
 # Testing
 
