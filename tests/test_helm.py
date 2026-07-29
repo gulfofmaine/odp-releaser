@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
+from yamlpath.exceptions import YAMLPathException
 
 from odp_releaser.manifests.helm import (
     dagster_deployment_path,
@@ -11,9 +12,6 @@ from odp_releaser.manifests.helm import (
 )
 from odp_releaser.schemas.client_payload import ClientPayload
 from odp_releaser.schemas.manifest_config import HelmManifest
-
-if TYPE_CHECKING:
-    import pytest
 
 FIXTURE = Path(__file__).parent / "manifests" / "dagster_helm_kustomize" / "values.yaml"
 IMAGE_NAME = "gmri/sea-eagle-brown-3crs"
@@ -89,9 +87,7 @@ def test_dagster_user_code_updates_matching_tag_and_preserves_rest() -> None:
     assert "\n---\n" not in result
 
 
-def test_non_matching_image_warns_and_leaves_file_unchanged(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_non_matching_image_raises() -> None:
     values_text = FIXTURE.read_text(encoding="utf-8")
     manifest = HelmManifest.model_validate(
         {"path": "./values.yaml", "dagster_user_code": True}
@@ -99,16 +95,10 @@ def test_non_matching_image_warns_and_leaves_file_unchanged(
     payload = _payload(image_name="gmri/not-in-this-file")
     commit_message: list[str] = []
 
-    with caplog.at_level(logging.WARNING, logger="odp-releaser"):
-        result = update_helm_values_with_payload(
+    with pytest.raises(YAMLPathException):
+        update_helm_values_with_payload(
             FIXTURE, values_text, manifest, payload, commit_message
         )
-
-    assert any(
-        "gmri/not-in-this-file" in record.getMessage() for record in caplog.records
-    )
-    # Original tag is left untouched.
-    assert 'tag: "ee1cadc"' in result
 
 
 def test_set_templates_apply_to_values_file() -> None:

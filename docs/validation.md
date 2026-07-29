@@ -77,6 +77,7 @@ check's consequence at bump or dispatch time -- that's the reason it exists.
 | A templated value fails to actually format against a real payload | Same failure, confirmed against real `value_format_kwargs()` |
 | A `comment` template uses an unknown placeholder, or a single stray `{`/`}` | `odp-releaser comment` can't render it; literal braces must be doubled (`{{`/`}}`). Comment templates have [their own vocabulary](config/image_manifest.md#comment-placeholders), so a `set`-only placeholder like `{payload}` is wrong here |
 | `kustomize_manifests[].pin: tag` but `/images[name=...]/newTag` doesn't exist | `bump-images` sets it with `mustexist=True`, which raises |
+| `dagster_user_code: true` but no matching `/deployments[image.repository=...]` entry | `bump-images` sets its tag with `mustexist=True`, which raises |
 | Referenced manifest file can't be read or parsed (unless `--no-check-files`) | `bump-images` fails the same way when it tries to load the file mid-run |
 
 **Warnings** (reported; fail the run only with `--strict`):
@@ -90,7 +91,6 @@ check's consequence at bump or dispatch time -- that's the reason it exists.
 | A templated value has no placeholder at all | `bump-images` can never change this value |
 | `kustomize_manifests[].pin: digest` but no `/images[name=...]` entry exists yet | Set with `mustexist=False`, which won't create the missing entry |
 | Both `newTag` and `digest` set on the same kustomize image entry | Kustomize prefers `digest`; bumping the tag has no visible effect |
-| `dagster_user_code: true` but no matching `/deployments[image.repository=...]` entry | `bump-images` only logs a warning and leaves the file unchanged |
 | The same resolved manifest path is targeted more than once for one event | `bump-images` applies all of them, redundantly |
 | A `comment` is configured for an event that never carries a source pull request (anything but `push`) | There is nothing to comment on, so the comment can never be posted |
 | `comment.staged` is set but `update_mode` resolves to `commit` | A direct commit is reported as deployed immediately, so only `comment.deployed` is ever used |

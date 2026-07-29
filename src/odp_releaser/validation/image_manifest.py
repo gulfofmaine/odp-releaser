@@ -678,16 +678,15 @@ def _validate_helm(
     _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
 
     if manifest.dagster_user_code and processor is not None:
-        # bump-images matches (and, if a deployment matches, writes)
-        # dagster_tag_path; this only needs to know a deployment entry exists
+        # bump-images matches (and writes) dagster_tag_path with
+        # mustexist=True; this only needs to know a deployment entry exists
         # at all, which is dagster_deployment_path (the same prefix that tag
         # path is built from).
         selector = dagster_deployment_path(image_name)
         if not _node_exists(processor, selector):
-            diagnostics.warning(
+            diagnostics.error(
                 f"dagster_user_code is true but no {selector} entry exists; "
-                "bump-images only logs a warning and leaves the file "
-                "unchanged in that case",
+                "bump-images sets its tag with mustexist=True, which raises",
                 location=location.child("dagster_user_code").location,
                 line=location.line,
             )

@@ -958,10 +958,10 @@ images:
     assert any("denies every source repository" in m for m in _messages(diagnostics))
 
 
-# --- W7: dagster_user_code with no matching deployment --------------------------
+# --- E10: dagster_user_code with no matching deployment --------------------------
 
 
-def test_dagster_user_code_missing_deployment_warns(tmp_path: Path) -> None:
+def test_dagster_user_code_missing_deployment_errors(tmp_path: Path) -> None:
     (tmp_path / "values.yaml").write_text(
         'deployments:\n  - name: other\n    image:\n      repository: gmri/other\n      tag: "1"\n'
     )
@@ -977,14 +977,14 @@ images:
 """,
     )
     diagnostics = validate_image_manifest(path)
-    assert diagnostics.errors == ()
     assert any("dagster_user_code is true" in m for m in _messages(diagnostics))
+    assert any("dagster_user_code is true" in d.message for d in diagnostics.errors)
 
 
-def test_dagster_user_code_warning_names_the_engines_own_selector(
+def test_dagster_user_code_error_names_the_engines_own_selector(
     tmp_path: Path,
 ) -> None:
-    """The validator's 'no deployment entry' warning must name the exact
+    """The validator's 'no deployment entry' error must name the exact
     entry selector the helm engine matches against -- proving both sides
     share ``helm.dagster_deployment_path``.
     """
