@@ -33,7 +33,7 @@ You can set up a development environment by running:
 uv sync
 ```
 
-# Prek
+# Pre-commit (via Prek)
 
 You should prepare prek, which will help you by checking that commits pass
 required checks:
