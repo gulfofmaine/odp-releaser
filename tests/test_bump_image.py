@@ -1233,3 +1233,230 @@ images:
         assert (crlf, bare_lf) == (len(lines) - 1, 0)
     else:
         assert (crlf, bare_lf) == (0, len(lines) - 1)
+
+
+def test_sync_destination_emitted_for_a_single_sync_enabled_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev
+      sync: true
+"""
+    )
+
+    client_payload = _payload_for()
+    _run_bump(config_path, client_payload)
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert (
+        outputs["sync_source_ref"]
+        == f"gmri/neracoos-mariners-dashboard@{client_payload.digest}"
+    )
+    assert outputs["sync_destinations"] == (
+        f"ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev:{client_payload.new_tag()}"
+    )
+
+
+def test_sync_destinations_fan_out_to_every_declared_destination(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Two authorized configs syncing to different registries get two copies.
+
+    This is the outage-generator case ``_resolve_sync_destinations`` exists
+    to avoid: unlike ``_resolve_config_setting``'s "first wins" handling of a
+    single-value disagreement, both declared destinations must be synced to,
+    not just the first in config order.
+    """
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev
+      sync: true
+    - events: [push]
+      deployed_as: 705162855742.dkr.ecr.us-east-1.amazonaws.com/gmri/mariners-dashboard
+      sync: true
+"""
+    )
+
+    client_payload = _payload_for()
+    _run_bump(config_path, client_payload)
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    new_tag = client_payload.new_tag()
+    assert outputs["sync_destinations"] == "\n".join(
+        [
+            f"ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev:{new_tag}",
+            (
+                "705162855742.dkr.ecr.us-east-1.amazonaws.com/gmri/"
+                f"mariners-dashboard:{new_tag}"
+            ),
+        ]
+    )
+
+
+def test_sync_destinations_dedupes_the_same_declared_destination(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Two configs declaring the same ``deployed_as`` yield one destination."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev
+      sync: true
+    - events: [push]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev
+      sync: true
+"""
+    )
+
+    client_payload = _payload_for()
+    _run_bump(config_path, client_payload)
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["sync_destinations"] == (
+        f"ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev:{client_payload.new_tag()}"
+    )
+
+
+def test_sync_destinations_empty_when_sync_is_unset_or_false(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A ``deployed_as`` alone (declare-only mirroring) does not sync."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      deployed_as: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/mariners
+    - events: [push]
+      deployed_as: ghcr.io/gulfofmaine/mariners-explicit-false
+      sync: false
+"""
+    )
+
+    _run_bump(config_path, _payload_for())
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["sync_destinations"] == ""
+    assert outputs["sync_source_ref"] == ""
+
+
+def test_sync_inherited_true_from_defaults_contributes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``defaults: sync: true`` is honoured by a config that leaves it unset."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+defaults:
+  sync: true
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev
+"""
+    )
+
+    client_payload = _payload_for()
+    _run_bump(config_path, client_payload)
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["sync_destinations"] == (
+        f"ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev:{client_payload.new_tag()}"
+    )
+
+
+def test_sync_destination_skips_a_config_filtered_out_by_authorization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A config the event/actor filters drop does not contribute a destination.
+
+    Two of the three configs below are filtered out before authorization
+    ever runs -- one by event, one by ``allowed_actors`` -- and a third
+    passes so the run doesn't abort outright (all configs being rejected is
+    itself a hard error, tested elsewhere). Only the surviving config's
+    destination should appear.
+    """
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [release]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-release-only
+      sync: true
+    - events: [push]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev
+      sync: true
+      allowed_actors:
+        users: [someone-else]
+    - events: [push]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-allowed
+      sync: true
+"""
+    )
+
+    client_payload = _payload_for()
+    _run_bump(config_path, client_payload)
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["sync_destinations"] == (
+        "ghcr.io/gulfofmaine/neracoos-mariners-dashboard-allowed:"
+        f"{client_payload.new_tag()}"
+    )
+
+
+def test_sync_destination_uses_new_tag_for_a_release_event(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A release payload's destination tag is ``new_tag()`` (``source.ref``), not ``tag``."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [release]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev
+      sync: true
+"""
+    )
+
+    client_payload = load_client_payload(EventType.release)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+    assert client_payload.source.event == "release"
+    assert client_payload.new_tag() == client_payload.source.ref
+    assert client_payload.new_tag() != client_payload.tag
+
+    _run_bump(config_path, client_payload)
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["sync_destinations"] == (
+        f"ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev:{client_payload.new_tag()}"
+    )
+    assert client_payload.tag not in outputs["sync_destinations"]
