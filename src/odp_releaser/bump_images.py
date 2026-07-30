@@ -319,6 +319,13 @@ def bump_images(
             "changed": "true" if changed else "false",
             "image_name": payload.image_name,
             "digest": payload.digest,
+            # The tag the manifests were bumped to, which for a release event
+            # is `source.ref` rather than `tag` (see `ClientPayload.new_tag`).
+            # Exposed because a caller layering its own steps on a
+            # `stage_only` bump has no other way to name the tag the bump just
+            # wrote -- reading `client_payload.tag` directly gets the release
+            # case wrong.
+            "new_tag": payload.new_tag(),
             "update_mode": update_mode,
             "environment": environment or "",
             "environment_url": environment_url or "",

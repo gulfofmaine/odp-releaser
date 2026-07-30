@@ -87,6 +87,7 @@ def test_success_path_writes_github_output(
     assert outputs["changed"] == "true"
     assert outputs["image_name"] == "gmri/neracoos-mariners-dashboard"
     assert outputs["digest"] == client_payload.digest
+    assert outputs["new_tag"] == client_payload.tag
     assert outputs["update_mode"] == "commit"
     assert (
         outputs["branch_name"] == "odp-releaser/bump-gmri-neracoos-mariners-dashboard"
@@ -129,6 +130,32 @@ def test_success_path_writes_github_output(
     assert metadata.comment.staged == DEFAULT_STAGED_TEMPLATE
     assert metadata.comment.deployed == DEFAULT_DEPLOYED_TEMPLATE
     assert metadata.comment_pr_number == 142
+
+
+def test_new_tag_output_uses_the_release_ref_for_a_release_event(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``new_tag`` exists so a caller layering its own steps onto a
+    ``stage_only`` bump can name the tag the bump actually wrote. That is only
+    worth an output because it is *not* ``client_payload.tag``: for a release
+    event ``ClientPayload.new_tag`` uses ``source.ref`` instead, so a workflow
+    reading the payload directly would tag its copy with the wrong string."""
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    client_payload = load_client_payload(EventType.release)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+    assert client_payload.source.ref != client_payload.tag
+
+    bump_images(
+        config_path=MANIFESTS_DIR / "comment" / "image_manifest.yaml",
+        client_payload=client_payload.model_dump_json(),
+        dry_run=True,
+    )
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["new_tag"] == client_payload.source.ref
+    assert outputs["new_tag"] != client_payload.tag
 
 
 def test_comment_pr_number_is_empty_without_a_source_pull_request(

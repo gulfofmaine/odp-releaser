@@ -123,6 +123,12 @@ outputs:
   digest:
     description: Digest (sha256:...) of the image the bump ran for.
     value: ${{ steps.bump.outputs.digest }}
+  new_tag:
+    description:
+      Tag the manifests were bumped to. For a release event this is the release
+      ref, not the payload's `tag`, so prefer this over reading the client
+      payload directly.
+    value: ${{ steps.bump.outputs.new_tag }}
   changed:
     description: Whether any manifests changed ("true"/"false").
     value: ${{ steps.bump.outputs.changed }}

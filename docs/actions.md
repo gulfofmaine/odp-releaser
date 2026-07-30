@@ -98,8 +98,13 @@ jobs:
         env:
           IMAGE_NAME: ${{ steps.bump.outputs.image_name }}
           DIGEST: ${{ steps.bump.outputs.digest }}
+          NEW_TAG: ${{ steps.bump.outputs.new_tag }}
         run: |
-          crane copy "$IMAGE_NAME@$DIGEST" "registry.example.com/${IMAGE_NAME#*/}"
+          # The destination needs the tag the bump just wrote. Without it the
+          # copy lands as `:latest` while the manifest points at `newTag:
+          # <tag>`, so the deploy reads a tag nothing ever pushed.
+          crane copy "$IMAGE_NAME@$DIGEST" \
+            "registry.example.com/${IMAGE_NAME#*/}:$NEW_TAG"
 
       - name: Commit bump
         if: steps.bump.outputs.changed == 'true'
@@ -134,6 +139,7 @@ jobs:
 | --- | --- |
 | `image_name` | Image name the bump ran for (no tag or digest). |
 | `digest` | Digest (`sha256:...`) of the image the bump ran for. |
+| `new_tag` | Tag the manifests were bumped to. For a `release` event this is the release ref, not the payload's `tag` — prefer this over reading the client payload directly. |
 | `changed` | Whether any manifests changed (`"true"`/`"false"`). |
 | `update_mode` | Update mode resolved from the image manifest config (`"commit"`/`"pull_request"`). |
 | `environment` | GitHub environment name resolved from the image manifest config for deployment reporting; empty when unconfigured. |
