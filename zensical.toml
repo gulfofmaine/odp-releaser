@@ -109,6 +109,21 @@ engine = "native"
 # ----------------------------------------------------------------------------
 # Plugins configuration
 # ----------------------------------------------------------------------------
+#
+# `default_handler` is deliberately left at its default of "python", since every
+# `::: odp_releaser.*` block relies on it. Blocks that document an action or a
+# reusable workflow name `handler: github` explicitly.
+[project.plugins.mkdocstrings.handlers.github.options]
+heading_level = 3
+show_outputs = true # defaults to false
+signature_repository = "gulfofmaine/odp-releaser"
+# Render the example `uses:` as `@<sha-or-tag>` to match the pinning convention
+# the prose teaches. The `ref`/`major`/`semver` modes read the checkout's git
+# tags or branch name, neither of which is meaningful in a docs build.
+signature_version = "string"
+signature_version_string = "<sha-or-tag>"
+signature_show_secrets = true
+
 [project.plugins.mkdocstrings.handlers.python]
 paths = ["src", "examples"]
 inventories = ["https://docs.python.org/3/objects.inv"]
