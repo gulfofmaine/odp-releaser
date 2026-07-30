@@ -49,7 +49,7 @@ def update_helm_values_with_payload(
 
     When ``manifest.dagster_user_code`` is true, the entry in the top-level
     ``deployments`` list whose ``image.repository`` matches
-    ``deployed_name`` (see ``bump_images.effective_deployed_name`` --
+    ``deployed_name`` (see :meth:`ImageConfig.deployed_name` --
     ``ImageConfig.deployed_as`` when set, otherwise ``payload.image_name``)
     has its ``image.tag`` set to ``payload.new_tag()``. The write uses
     ``mustexist=True``, so if no deployment matches, this raises (mirroring

@@ -63,7 +63,7 @@ def update_kustomize_with_payload(
     switch to digest pinning), that's left untouched; reconciling it is on
     the operator.
 
-    ``deployed_name`` (see ``bump_images.effective_deployed_name``) is
+    ``deployed_name`` (see :meth:`ImageConfig.deployed_name`) is
     deliberately *not* used to select the ``images:`` entry: kustomize's own
     ``newName`` field is what actually carries a mirrored image name, so the
     entry stays keyed on ``payload.image_name`` (the upstream name) whether

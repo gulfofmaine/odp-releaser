@@ -35,7 +35,7 @@ def update_file_with_payload(
     There is no implicit image field on this engine (see
     :class:`~odp_releaser.schemas.manifest_config.FileManifest`), so
     ``deployed_name`` (``ImageConfig.deployed_as`` when set, otherwise
-    ``payload.image_name`` -- see ``bump_images.effective_deployed_name``)
+    ``payload.image_name`` -- see :meth:`ImageConfig.deployed_name`)
     only ever reaches this manifest via ``{deployed_image}`` in a ``set``
     template, e.g. ``"{deployed_image}@{digest}"`` in place of a hand-typed
     mirror registry path.

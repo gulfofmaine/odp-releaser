@@ -128,7 +128,7 @@ def apply_set_templates(
     drawn from ``payload``, plus ``{deployed_image}`` -- the name the
     manifests actually deploy from (``ImageConfig.deployed_as`` when set,
     otherwise the payload's own ``image_name``; see
-    ``bump_images.effective_deployed_name``, the single place that rule is
+    :meth:`ImageConfig.deployed_name`, the single place that rule is
     computed). ``{deployed_image}`` lets a ``file_manifests`` entry write
     e.g. ``"{deployed_image}@{digest}"`` instead of a hand-typed mirror
     registry path. A missing template variable raises a ``KeyError`` wrapped

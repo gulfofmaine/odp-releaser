@@ -99,7 +99,7 @@ check's consequence at bump or dispatch time -- that's the reason it exists.
 | A `comment` is configured for an event that never carries a source pull request (anything but `push`) | There is nothing to comment on, so the comment can never be posted |
 | `comment.staged` is set but `update_mode` resolves to `commit` | A direct commit is reported as deployed immediately, so only `comment.deployed` is ever used |
 | Multiple configs matching the same event disagree on `update_mode` or a resolved setting (`environment`, `environment_url`, `reviewers`, `team_reviewers`, `comment`) | `bump-images` warns and silently uses the first config's value |
-| `deployed_as` is set to the same value as this image's own `images:` key | Redundant: `effective_deployed_name` already falls back to the `images:` key when `deployed_as` is unset, so this declares nothing new |
+| `deployed_as` is set to the same value as this image's own `images:` key | Redundant: `ImageConfig.deployed_name` already falls back to the `images:` key when `deployed_as` is unset, so this declares nothing new |
 | A kustomize manifest's `/images[name=...]/newName` is set but no `deployed_as` declares it | `sync` and the Helm dagster shorthand can't see this mirror |
 | A `file_manifests` `set` value hard-codes the upstream image name while `deployed_as` is set on the same config | Almost certainly meant to reference `{deployed_image}` instead — otherwise the wrong registry gets written |
 | Two configs writing the same resolved manifest path resolve different `deployed_as` values | The manifest can only agree with one mirror; at least one config is wrong about what it actually deploys |

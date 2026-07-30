@@ -32,7 +32,6 @@ from odp_releaser.schemas.manifest_config import (
     ImageConfig,
     ManifestConfig,
     configs_for_event,
-    effective_deployed_name,
     resolve_comment_config,
     resolve_setting,
 )
@@ -60,7 +59,7 @@ def _apply_manifest[ManifestT: _HasPath](
     Returns ``True`` when the update changed the manifest's contents. The
     update's commit message entries are only appended to ``commit_message``
     when the contents actually changed, so unchanged manifests don't show up
-    in the audit trail. ``deployed_name`` (see :func:`effective_deployed_name`)
+    in the audit trail. ``deployed_name`` (see :meth:`ImageConfig.deployed_name`)
     is passed straight through to ``update_fn``, which each engine uses
     differently -- see their own docstrings.
     """
@@ -256,7 +255,7 @@ def bump_images(
         )
 
         for image_config in authorized_configs:
-            deployed_name = effective_deployed_name(image_config, payload)
+            deployed_name = image_config.deployed_name(payload.image_name)
             for kustomize_manifest in image_config.kustomize_manifests:
                 if _apply_manifest(
                     kustomize_manifest,

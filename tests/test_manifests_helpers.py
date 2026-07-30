@@ -90,7 +90,7 @@ def test_apply_set_templates_deployed_image_kwarg_is_available() -> None:
     placeholder isn't drawn from the payload at all -- it's whatever the
     caller passes as ``deployed_name`` (``ImageConfig.deployed_as`` when
     set, otherwise the payload's own ``image_name``; see
-    ``bump_images.effective_deployed_name``).
+    ``ImageConfig.deployed_name``).
     """
     processor = open_for_editing("some:\n  path: old\n")
     commit_message: list[str] = []

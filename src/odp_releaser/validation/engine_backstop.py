@@ -131,7 +131,7 @@ def run_engine_backstop[ManifestT](
     A real ``payload`` is used when available (matching what ``bump_images``
     would actually apply); otherwise one is synthesized per
     :func:`synthesize_payload`. ``deployed_name`` must be the caller's own
-    :func:`~odp_releaser.bump_images.effective_deployed_name` result -- this
+    :meth:`ImageConfig.deployed_name` result -- this
     function has no ``ImageConfig`` to derive it from itself -- so the
     backstop calls each engine with exactly the name ``bump_images`` would.
     """

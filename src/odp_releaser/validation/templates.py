@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 # The placeholders every ``set``/``environment_url`` template may reference.
 # Four of these are drawn straight from :meth:`ClientPayload.value_format_kwargs`;
 # ``deployed_image`` is not one of them -- ``apply_set_templates`` adds it
-# itself (see its docstring), formatted from ``effective_deployed_name``
+# itself (see its docstring), formatted from ``ImageConfig.deployed_name``
 # rather than read off the payload -- so it's listed here alongside the
 # payload-derived keys but excluded from the cross-check below. Kept here
 # (rather than re-derived) and cross-checked by a test against a real

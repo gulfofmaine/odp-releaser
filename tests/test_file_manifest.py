@@ -108,7 +108,7 @@ def test_deployed_image_template_renders_the_mirrored_name() -> None:
     Unlike ``{new_tag}``/``{git_sha}``/``{digest}``, this placeholder isn't
     read off the payload -- it's ``ImageConfig.deployed_as`` when set,
     otherwise the payload's own ``image_name`` (see
-    ``bump_images.effective_deployed_name``).
+    ``ImageConfig.deployed_name``).
     """
     path = FIXTURE_DIR / "deployment.yaml"
     mirrored_name = (

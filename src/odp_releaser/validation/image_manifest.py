@@ -71,9 +71,6 @@ from odp_releaser.schemas.manifest_config import (
     ImageConfig,
     KustomizeManifest,
     ManifestConfig,
-    config_matches_event,
-    deployed_name_for,
-    effective_deployed_name,
 )
 from odp_releaser.validation.cross_config import check_cross_config
 from odp_releaser.validation.deployed_as import (
@@ -201,8 +198,7 @@ def validate_image_manifest(
         matching = [
             (index, image_config)
             for index, image_config in enumerate(image_configs)
-            if payload is None
-            or config_matches_event(image_config, payload.source.event)
+            if payload is None or image_config.matches_event(payload.source.event)
         ]
         if not matching:
             continue
@@ -486,16 +482,10 @@ def _validate_config_item(
         )
 
     event = representative_event(image_config)
-    # The same rule bump_images applies at bump time (see
-    # effective_deployed_name's docstring), just evaluated against `image_name`
-    # instead of `payload.image_name` when no real payload is available --
-    # the two are guaranteed equal whenever `payload` is not None, since a
-    # caller only ever reaches this config with a payload that already
-    # matched `image_name` (see validate_image_manifest's own filtering).
-    deployed_name = (
-        effective_deployed_name(image_config, payload)
-        if payload is not None
-        else deployed_name_for(image_config.deployed_as, image_name)
+    # A real bump keys deployed_name off the payload's image name; here,
+    # without a payload, the config's own `images:` key stands in for it.
+    deployed_name = image_config.deployed_name(
+        payload.image_name if payload is not None else image_name
     )
 
     for index, kustomize_manifest in enumerate(image_config.kustomize_manifests):
@@ -713,7 +703,7 @@ def _validate_helm(
                 f"dagster_user_code is true but no {selector} entry exists; "
                 f"this matched on the deployed name {deployed_name!r} "
                 "(image_config.deployed_as if set, else the payload's "
-                "image_name -- see effective_deployed_name), and "
+                "image_name -- see ImageConfig.deployed_name), and "
                 "bump-images sets its tag with mustexist=True, which raises",
                 location=location.child("dagster_user_code").location,
                 line=location.line,

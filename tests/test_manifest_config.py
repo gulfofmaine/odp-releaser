@@ -21,7 +21,6 @@ from odp_releaser.schemas.manifest_config import (
     KustomizeManifest,
     ManifestConfig,
     ResolvedComment,
-    config_matches_event,
     configs_for_event,
     resolve_comment_config,
     resolve_setting,
@@ -217,22 +216,22 @@ def test_sync_unset_with_no_default_falls_back_to_none() -> None:
     assert resolve_setting(config.sync, defaults.sync) is None
 
 
-# --- config_matches_event / configs_for_event --------------------------------
+# --- ImageConfig.matches_event / configs_for_event ----------------------------
 
 
-def test_config_matches_event_none_matches_every_event() -> None:
+def test_matches_event_none_matches_every_event() -> None:
     config = ImageConfig(events=None)
 
-    assert config_matches_event(config, "push")
-    assert config_matches_event(config, "release")
+    assert config.matches_event("push")
+    assert config.matches_event("release")
 
 
-def test_config_matches_event_only_matches_listed_events() -> None:
+def test_matches_event_only_matches_listed_events() -> None:
     config = ImageConfig(events=["push", "publish"])
 
-    assert config_matches_event(config, "push")
-    assert config_matches_event(config, "publish")
-    assert not config_matches_event(config, "release")
+    assert config.matches_event("push")
+    assert config.matches_event("publish")
+    assert not config.matches_event("release")
 
 
 def test_configs_for_event_filters_and_preserves_config_order() -> None:

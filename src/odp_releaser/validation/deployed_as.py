@@ -15,7 +15,7 @@ real bump. Every check below models one way that could go wrong at runtime:
 - ``sync: true`` (directly or inherited from ``defaults``) with no
   ``deployed_as`` to copy the payload's image to.
 - A ``deployed_as`` that just repeats the image's own ``images:`` key --
-  legal (``effective_deployed_name`` falls back to that anyway), but a no-op
+  legal (``ImageConfig.deployed_name`` falls back to that anyway), but a no-op
   declaration that suggests a copy-paste rather than a real mirror.
 - A kustomize manifest whose ``images:`` entry's ``newName`` disagrees with,
   omits, or, the converse, carries a mirror that ``deployed_as`` never
@@ -80,7 +80,7 @@ def check_deployed_as_and_sync(
         if deployed_as == image_name:
             diagnostics.warning(
                 f"deployed_as is set to {deployed_as!r}, the same as this "
-                "image's own images key; effective_deployed_name already "
+                "image's own images key; ImageConfig.deployed_name already "
                 "falls back to that when deployed_as is unset, so this "
                 "declares nothing new",
                 location=location.child("deployed_as").location,

@@ -14,8 +14,6 @@ if TYPE_CHECKING:
     from pydantic.json_schema import JsonSchemaValue
     from pydantic_core import CoreSchema
 
-    from odp_releaser.schemas.client_payload import ClientPayload
-
 SET_DESCRIPTION = (
     "Mapping of yamlpath expressions to templated values. "
     "Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, `{payload}`, "
@@ -375,6 +373,26 @@ class ImageConfig(BaseModel):
         default_factory=list,
     )
 
+    def matches_event(self, event: str) -> bool:
+        """Whether this config applies to ``event``; ``events: None`` matches every event."""
+        events = self.events
+        if events is None:
+            return True
+        # mypy is happy with this; pylint's pydantic plugin misinfers the field
+        # type once it is read off `self`, so the membership test reads as
+        # invalid to it. The equivalent module-level function did not trip it.
+        return event in events  # pylint: disable=unsupported-membership-test
+
+    def deployed_name(self, upstream: str) -> str:
+        """``deployed_as`` when set, otherwise ``upstream``.
+
+        Resolved per config, not across configs: unlike other per-config
+        settings, this is deliberately never routed through
+        ``bump_images._resolve_config_setting``, whose first-wins-and-warn
+        behaviour would silently pick one of two configs' registries.
+        """
+        return self.deployed_as or upstream
+
 
 class ConfigDefaults(BaseModel):
     """Default settings for every image config; a config's own value replaces the default."""
@@ -526,56 +544,6 @@ def _resolve_comment_field[FieldT](
     return builtin
 
 
-def deployed_name_for(deployed_as: str | None, upstream: str) -> str:
-    """``deployed_as`` when set, otherwise ``upstream``.
-
-    The one place this fallback is spelled: :func:`effective_deployed_name`
-    calls it with the payload's ``image_name`` as ``upstream``, and the
-    config validator calls it directly with the config's own ``images:`` key
-    when no real payload is available to predict the same name from.
-    """
-    return deployed_as or upstream
-
-
-def effective_deployed_name(image_config: ImageConfig, payload: ClientPayload) -> str:
-    """The image name ``image_config``'s manifests actually deploy from.
-
-    ``deployed_name_for(image_config.deployed_as, payload.image_name)`` --
-    the single place that rule is computed with a real payload. Shared by
-    ``bump_images`` (which applies this to every manifest engine call), the
-    config validator (which needs to predict the identical name a real bump
-    would use), and any CLI output that reports the deployed name -- the same
-    reason ``resolve_setting`` and :func:`config_matches_event` live here
-    rather than in ``bump_images`` itself: it lets every consumer import this
-    rule without importing ``bump_images``, which imports the validator in a
-    later step, so a hand-respelled copy anywhere else could silently drift
-    from what a real bump actually uses.
-
-    Deliberately resolved *per config*, never across configs: unlike every
-    other per-config setting ``bump_images`` resolves, this is never routed
-    through its ``_resolve_config_setting`` helper, whose "first wins, log a
-    warning" behaviour is reasonable for a disagreement over, say, an
-    environment name, but would be actively wrong here -- silently deploying
-    from one of two configs' declared registries just because it came first
-    in the list.
-    """
-    return deployed_name_for(image_config.deployed_as, payload.image_name)
-
-
-def config_matches_event(image_config: ImageConfig, event: str) -> bool:
-    """Whether ``image_config`` applies to ``event``.
-
-    An ``events: None`` config matches every event; otherwise ``event`` must
-    be explicitly listed. This is the exact filter ``bump_images`` applies to
-    an image's configs, before resolving any setting or applying any
-    manifest, so the validator must use this same predicate rather than
-    re-spell it -- otherwise a future change to the event-matching rule could
-    land on one side only, leaving the validator checking a different set of
-    configs than the ones a real run would apply.
-    """
-    return image_config.events is None or event in image_config.events
-
-
 def configs_for_event(
     image_configs: Iterable[ImageConfig], event: str
 ) -> list[ImageConfig]:
@@ -583,7 +551,7 @@ def configs_for_event(
     return [
         image_config
         for image_config in image_configs
-        if config_matches_event(image_config, event)
+        if image_config.matches_event(event)
     ]
 
 

@@ -17,8 +17,6 @@ from typing import TYPE_CHECKING, get_args
 from odp_releaser.manifests.helpers import resolve_manifest_path
 from odp_releaser.schemas.manifest_config import (
     ImageConfig,
-    config_matches_event,
-    deployed_name_for,
     resolve_comment_config,
     resolve_setting,
 )
@@ -91,7 +89,7 @@ def check_cross_config(
         indices = frozenset(
             index
             for index, image_config in enumerate(image_configs)
-            if config_matches_event(image_config, event)
+            if image_config.matches_event(event)
         )
         if not indices or indices in seen_groups:
             continue
@@ -133,7 +131,7 @@ def _check_duplicate_manifest_targets(
       ``deployed_as`` values is worse than redundant: unlike
       :data:`_AGREEMENT_ATTRS`, differing ``deployed_as`` across configs is
       normal in general (it's resolved per config, never across them --
-      see ``effective_deployed_name``'s docstring) -- but a single manifest
+      see :meth:`ImageConfig.deployed_name`'s docstring) -- but a single manifest
       file (a kustomize ``newName``, a Helm ``image.repository``) can only
       agree with one mirror name at a time, so two configs writing the same
       file while claiming different mirrors means at least one of them is
@@ -147,7 +145,7 @@ def _check_duplicate_manifest_targets(
             *image_config.helm_charts,
             *image_config.file_manifests,
         ]
-        deployed_as = deployed_name_for(image_config.deployed_as, image_name)
+        deployed_as = image_config.deployed_name(image_name)
         for manifest in manifests:
             resolved = resolve_manifest_path(config_path, manifest.path)
             counts[resolved] = counts.get(resolved, 0) + 1
