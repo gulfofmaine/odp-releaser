@@ -526,18 +526,30 @@ def _resolve_comment_field[FieldT](
     return builtin
 
 
+def deployed_name_for(deployed_as: str | None, upstream: str) -> str:
+    """``deployed_as`` when set, otherwise ``upstream``.
+
+    The one place this fallback is spelled: :func:`effective_deployed_name`
+    calls it with the payload's ``image_name`` as ``upstream``, and the
+    config validator calls it directly with the config's own ``images:`` key
+    when no real payload is available to predict the same name from.
+    """
+    return deployed_as or upstream
+
+
 def effective_deployed_name(image_config: ImageConfig, payload: ClientPayload) -> str:
     """The image name ``image_config``'s manifests actually deploy from.
 
-    ``image_config.deployed_as`` when set, otherwise ``payload.image_name``.
-    Shared by ``bump_images`` (which applies this to every manifest engine
-    call), the config validator (which needs to predict the identical name a
-    real bump would use), and any CLI output that reports the deployed name
-    -- the same reason ``resolve_setting`` and :func:`config_matches_event`
-    live here rather than in ``bump_images`` itself: it lets every consumer
-    import this rule without importing ``bump_images``, which imports the
-    validator in a later step, so a hand-respelled copy anywhere else could
-    silently drift from what a real bump actually uses.
+    ``deployed_name_for(image_config.deployed_as, payload.image_name)`` --
+    the single place that rule is computed with a real payload. Shared by
+    ``bump_images`` (which applies this to every manifest engine call), the
+    config validator (which needs to predict the identical name a real bump
+    would use), and any CLI output that reports the deployed name -- the same
+    reason ``resolve_setting`` and :func:`config_matches_event` live here
+    rather than in ``bump_images`` itself: it lets every consumer import this
+    rule without importing ``bump_images``, which imports the validator in a
+    later step, so a hand-respelled copy anywhere else could silently drift
+    from what a real bump actually uses.
 
     Deliberately resolved *per config*, never across configs: unlike every
     other per-config setting ``bump_images`` resolves, this is never routed
@@ -547,7 +559,7 @@ def effective_deployed_name(image_config: ImageConfig, payload: ClientPayload) -
     from one of two configs' declared registries just because it came first
     in the list.
     """
-    return image_config.deployed_as or payload.image_name
+    return deployed_name_for(image_config.deployed_as, payload.image_name)
 
 
 def config_matches_event(image_config: ImageConfig, event: str) -> bool:

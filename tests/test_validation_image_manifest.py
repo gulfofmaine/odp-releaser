@@ -1348,6 +1348,158 @@ images:
     )
 
 
+# --- deployed_as: cross-image collisions ---------------------------------------
+
+
+def test_two_images_same_deployed_as_both_syncing_errors(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app-one:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+      sync: true
+  gmri/app-two:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is True
+    messages = _messages(diagnostics)
+    assert any(
+        "gmri/app-one" in m and "gmri/app-two" in m and "sync: true" in m
+        for m in messages
+    )
+
+
+def test_two_images_same_deployed_as_neither_syncing_warns(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app-one:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+  gmri/app-two:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is False
+    messages = _messages(diagnostics)
+    assert any(
+        "gmri/app-one" in m and "gmri/app-two" in m and "declared by more than one" in m
+        for m in messages
+    )
+
+
+def test_two_images_same_deployed_as_sync_inherited_from_defaults_errors(
+    tmp_path: Path,
+) -> None:
+    """``sync`` inherits from ``defaults.sync`` here too, exactly like the
+    single-config check: a repo-wide ``defaults: sync: true`` is exactly as
+    dangerous as an explicit per-config one."""
+    path = _write(
+        tmp_path,
+        """
+defaults:
+  sync: true
+images:
+  gmri/app-one:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+  gmri/app-two:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is True
+    assert any("sync: true" in m for m in _messages(diagnostics))
+
+
+def test_two_images_different_deployed_as_is_clean(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app-one:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror-one
+      sync: true
+  gmri/app-two:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror-two
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any(
+        "declared by more than one" in m
+        or "declared with sync: true by more than one" in m
+        for m in _messages(diagnostics)
+    )
+
+
+def test_one_image_same_deployed_as_across_its_own_configs_is_not_a_collision(
+    tmp_path: Path,
+) -> None:
+    """A single image declaring the same ``deployed_as`` across two of its own
+    configs is legitimate (a ``sync`` fans out per config); this check only
+    fires across *different* images keys."""
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      sync: true
+    - events: [release]
+      deployed_as: ghcr.io/gmri/mirror
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any(
+        "declared by more than one" in m
+        or "declared with sync: true by more than one" in m
+        for m in _messages(diagnostics)
+    )
+
+
+def test_payload_filtered_run_does_not_crash_or_half_fire_collision_check(
+    tmp_path: Path,
+) -> None:
+    """A payload-filtered run only ever has one image key in scope, so a
+    cross-image collision can never be observed -- this just has to not
+    crash and not report one anyway."""
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+      sync: true
+  gmri/other-app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, payload=_payload(), check_files=False)
+    assert not any(
+        "declared by more than one" in m
+        or "declared with sync: true by more than one" in m
+        for m in _messages(diagnostics)
+    )
+
+
 # --- Dogfood: mirrored_dagster fixture ------------------------------------------
 
 

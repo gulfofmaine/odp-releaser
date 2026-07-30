@@ -18,6 +18,7 @@ from odp_releaser.manifests.helpers import resolve_manifest_path
 from odp_releaser.schemas.manifest_config import (
     ImageConfig,
     config_matches_event,
+    deployed_name_for,
     resolve_comment_config,
     resolve_setting,
 )
@@ -146,7 +147,7 @@ def _check_duplicate_manifest_targets(
             *image_config.helm_charts,
             *image_config.file_manifests,
         ]
-        deployed_as = image_config.deployed_as or image_name
+        deployed_as = deployed_name_for(image_config.deployed_as, image_name)
         for manifest in manifests:
             resolved = resolve_manifest_path(config_path, manifest.path)
             counts[resolved] = counts.get(resolved, 0) + 1

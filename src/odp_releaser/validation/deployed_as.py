@@ -37,6 +37,8 @@ from odp_releaser.schemas.manifest_config import resolve_setting
 from odp_releaser.validation.image_name_shape import image_name_shape_problems
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from odp_releaser.schemas.manifest_config import ConfigDefaults, ImageConfig
     from odp_releaser.validation.diagnostics import Diagnostics
     from odp_releaser.validation.location import ConfigLocation
@@ -93,6 +95,61 @@ def check_deployed_as_and_sync(
             location=location.child("sync").location,
             line=location.line,
         )
+
+
+def check_deployed_as_collisions(
+    image_configs_by_name: Mapping[str, Sequence[ImageConfig]],
+    defaults: ConfigDefaults,
+    diagnostics: Diagnostics,
+) -> None:
+    """Flag two different ``images:`` keys resolving the same ``deployed_as``.
+
+    Grouped by ``deployed_as`` value and then by the *owning* image key, so
+    one image declaring the same ``deployed_as`` across several of its own
+    configs never counts (legitimate -- a ``sync`` fans out per config, and
+    ``check_cross_config`` already covers a shared manifest file within one
+    image); only two or more distinct image keys sharing it do. ``sync`` is
+    resolved the same way :func:`check_deployed_as_and_sync` does, since a
+    repo-wide ``defaults: sync: true`` is exactly as dangerous here as an
+    explicit per-config one. Error when at least two of the colliding images
+    resolve ``sync`` true: they would race to copy different upstream images
+    onto the same mirror tag, last write wins. Warning otherwise: nothing is
+    overwritten, but the images still can't both legitimately deploy from
+    one name.
+
+    Callers building ``image_configs_by_name`` from a ``payload``-filtered
+    run naturally leave only one image key in scope, so this can never fire
+    there -- correctly, since a cross-image collision can't be observed
+    looking at one image at a time.
+    """
+    images_by_deployed_as: dict[str, dict[str, bool]] = {}
+    for image_name, image_configs in image_configs_by_name.items():
+        for image_config in image_configs:
+            deployed_as = image_config.deployed_as
+            if deployed_as is None:
+                continue
+            sync = bool(resolve_setting(image_config.sync, defaults.sync))
+            images = images_by_deployed_as.setdefault(deployed_as, {})
+            images[image_name] = images.get(image_name, False) or sync
+
+    for deployed_as, images in images_by_deployed_as.items():
+        if len(images) < 2:
+            continue
+        names = sorted(images)
+        syncing = [name for name in names if images[name]]
+        if len(syncing) >= 2:
+            diagnostics.error(
+                f"deployed_as {deployed_as!r} is declared with sync: true by "
+                f"more than one image ({', '.join(syncing)}); they would "
+                "copy different upstream images to the same mirror tag, and "
+                "whichever bump runs last wins"
+            )
+        else:
+            diagnostics.warning(
+                f"deployed_as {deployed_as!r} is declared by more than one "
+                f"image ({', '.join(names)}); each would deploy from this "
+                "mirror expecting a different upstream image"
+            )
 
 
 def check_kustomize_deployed_as_agreement(

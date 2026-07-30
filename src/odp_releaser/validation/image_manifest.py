@@ -72,11 +72,13 @@ from odp_releaser.schemas.manifest_config import (
     KustomizeManifest,
     ManifestConfig,
     config_matches_event,
+    deployed_name_for,
     effective_deployed_name,
 )
 from odp_releaser.validation.cross_config import check_cross_config
 from odp_releaser.validation.deployed_as import (
     check_deployed_as_and_sync,
+    check_deployed_as_collisions,
     check_file_manifest_set_upstream_name,
     check_kustomize_deployed_as_agreement,
 )
@@ -179,6 +181,13 @@ def validate_image_manifest(
             warn_if_no_placeholder=False,
         )
 
+    # Only images in scope for this run (all of them when there's no payload,
+    # else just payload.image_name, matching validate_image_configs's own
+    # filtering below) feed check_deployed_as_collisions -- a payload-filtered
+    # run leaves at most one image key here, so a cross-image collision
+    # correctly can't fire for it.
+    in_scope_configs: dict[str, Sequence[ImageConfig]] = {}
+
     for image_name, image_configs in config.images.items():
         image_line = line_for_key(images_data, image_name)
         _check_image_name(image_name, diagnostics, line=image_line)
@@ -198,6 +207,9 @@ def validate_image_manifest(
         if not matching:
             continue
 
+        matching_configs = [image_config for _, image_config in matching]
+        in_scope_configs[image_name] = matching_configs
+
         first_index = matching[0][0]
         item_line = line_for_index(configs_data, first_index)
         location = ConfigLocation(
@@ -208,13 +220,15 @@ def validate_image_manifest(
         validate_image_configs(
             config_path,
             image_name,
-            [image_config for _, image_config in matching],
+            matching_configs,
             config.defaults,
             payload=payload,
             check_files=check_files,
             diagnostics=diagnostics,
             location=location,
         )
+
+    check_deployed_as_collisions(in_scope_configs, config.defaults, diagnostics)
 
     return diagnostics
 
@@ -481,7 +495,7 @@ def _validate_config_item(
     deployed_name = (
         effective_deployed_name(image_config, payload)
         if payload is not None
-        else (image_config.deployed_as or image_name)
+        else deployed_name_for(image_config.deployed_as, image_name)
     )
 
     for index, kustomize_manifest in enumerate(image_config.kustomize_manifests):
