@@ -91,7 +91,7 @@ on:
         required: false
         type: number
         default: 1
-      client_payload:
+      client_payload: # group: Testing aids
         description: >-
           Explicit client_payload JSON string. Empty (the default) uses the
           triggering repository_dispatch event's client_payload. Testing aid for
@@ -99,7 +99,7 @@ on:
         required: false
         type: string
         default: ""
-      dry_run:
+      dry_run: # group: Testing aids
         description: >-
           Run the CLI with --dry-run (no manifest files written) and skip the
           commit and pull-request steps. Outputs are still produced. Testing
@@ -107,7 +107,7 @@ on:
         required: false
         type: boolean
         default: false
-      sync:
+      sync: # group: Image sync
         description: >-
           Set false to skip the image sync even for configs whose `sync: true`
           asks for one. Only relevant when the image manifest declares a
@@ -115,7 +115,7 @@ on:
         required: false
         type: boolean
         default: true
-      sync_aws_role_arn:
+      sync_aws_role_arn: # group: Image sync
         description: >-
           IAM role to assume via OIDC before syncing, for an ECR destination.
           When set, this workflow runs configure-aws-credentials and
@@ -129,7 +129,7 @@ on:
         required: false
         type: string
         default: ""
-      sync_aws_region:
+      sync_aws_region: # group: Image sync
         description: AWS region for sync_aws_role_arn.
         required: false
         type: string
@@ -158,7 +158,9 @@ on:
           config; empty when unconfigured.
         value: ${{ jobs.bump.outputs.environment_url }}
       branch_name:
-        description: Branch name a pull_request-mode bump uses.
+        description: >-
+          Branch name a pull_request-mode bump uses
+          (odp-releaser/bump-<image_name>).
         value: ${{ jobs.bump.outputs.branch_name }}
       commit_message:
         description: Full commit message for the bump.
@@ -235,19 +237,19 @@ on:
       reporter_app_private_key:
         description: Optional private key matching reporter_app_id.
         required: false
-      sync_registry:
+      sync_registry: # group: Image sync
         description: >-
           Registry host to `docker login` to before syncing, for a destination
           that uses username/password auth (GHCR, Docker Hub). Leave unset when
           using sync_aws_role_arn, or when no config asks for a sync.
         required: false
-      sync_username:
+      sync_username: # group: Image sync
         description: Username for sync_registry.
         required: false
-      sync_password:
+      sync_password: # group: Image sync
         description: Password or token for sync_registry.
         required: false
-      sync_source_registry:
+      sync_source_registry: # group: Image sync
         description: >-
           Registry host to `docker login` to for the *source* side of a sync.
           Only needed when the image is pulled from somewhere that requires
@@ -257,10 +259,10 @@ on:
           bump on purpose, an unauthenticated source is a source of intermittent
           release failures.
         required: false
-      sync_source_username:
+      sync_source_username: # group: Image sync
         description: Username for sync_source_registry.
         required: false
-      sync_source_password:
+      sync_source_password: # group: Image sync
         description: Password or token for sync_source_registry.
         required: false
 

@@ -30,9 +30,10 @@ on:
     inputs:
       image_name:
         description: >-
-          Full image name exactly as your deployment manifests reference it,
-          with the registry host when the registry is not Docker Hub (e.g.
-          gmri/my-service or ghcr.io/owner/my-service). No tag or digest.
+          Full image name exactly as your deployment manifests reference it. For
+          Docker Hub this is owner/name (no docker.io/ prefix); other registries
+          must include the registry host (e.g. ghcr.io/owner/my-service). No tag
+          or digest.
         required: true
         type: string
       tag:
@@ -40,7 +41,10 @@ on:
         required: true
         type: string
       digest:
-        description: Digest (sha256:...) of the published image.
+        description: >-
+          Digest (sha256:...) of the published image. Must be a bare digest -- a
+          value still carrying a repo@ prefix (e.g. from docker inspect's
+          RepoDigests) is rejected.
         required: true
         type: string
       environment:
@@ -62,14 +66,14 @@ on:
         required: false
         type: number
         default: 1
-      dry_run:
+      dry_run: # group: Testing aids
         description: >-
           Resolve dispatch credentials for every target but send no dispatch
           events. Testing aid; used by this repo's own e2e CI.
         required: false
         type: boolean
         default: false
-      event_name:
+      event_name: # group: Testing aids
         description: >-
           Override the GitHub event name used to build the client payload
           (testing aid). Empty (the default) uses the run's real event. Only
@@ -90,14 +94,15 @@ on:
         value: ${{ jobs.notify.outputs.target_count }}
     secrets:
       dispatch_app_id:
-        description:
-          App ID of the GitHub App used to dispatch to deploy repos. Required if
-          dispatch_app_id is not provided.
+        description: >-
+          App ID of the default GitHub App used to dispatch to deploy repos.
+          Used for any target owner that dispatch_apps does not cover, so it is
+          required unless dispatch_apps covers every target.
         required: false
       dispatch_app_private_key:
         description:
-          Private key of the dispatch GitHub App. Required if dispatch_app_id is
-          not provided.
+          Private key of the default dispatch GitHub App. Required whenever
+          dispatch_app_id is set.
         required: false
       dispatch_apps:
         description: >-
