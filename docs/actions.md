@@ -62,6 +62,15 @@ Prerequisites:
   `uses:` paths resolve against the workflow's workspace, not the action's
   repo — [actions/runner#1348](https://github.com/actions/runner/issues/1348)),
   so the two actions compose in your workflow.
+- Only when the image manifest asks for a sync (`deployed_as` with
+  `sync: true`): `skopeo` on the PATH (preinstalled on GitHub-hosted ubuntu
+  runners), and the destination registry already logged in to by an earlier
+  step (`docker/login-action`, or `configure-aws-credentials` +
+  `amazon-ecr-login`). skopeo reads those credentials from
+  `$HOME/.docker/config.json` via the containers credential search order, so
+  no separate `skopeo login` step is needed. A caller that configures a
+  Docker *credential helper* instead is the exception, the credentials are
+  then not in that file, and skopeo won't resolve them.
 
 ### `stage_only`: bump without committing
 
@@ -127,6 +136,7 @@ jobs:
 | `git_user_name` | no | `odp-releaser[bot]` | Git author/committer name for direct commits. |
 | `git_user_email` | no | `odp-releaser[bot]@users.noreply.github.com` | Git author/committer email for direct commits. |
 | `stage_only` | no | `"false"` | When `"true"`, write the manifest changes and `git add` them, but make no commit and open no pull request. |
+| `sync` | no | `"true"` | When `"false"`, skip the image sync even for configs whose `sync: true` asks for one. The sync otherwise runs whenever the image manifest declares a `deployed_as` with `sync: true`, between writing the manifests and committing them. Requires `skopeo` and a logged in destination registry. |
 | `dry_run` | no | `"false"` | Testing aid: run the CLI with `--dry-run` (no manifest files written) and skip the stage, commit, and pull-request steps. Outputs are still produced. |
 | `token` | no | `${{ github.token }}` | Token used to push the bump commit or open the pull request. Pass an app-minted token if the resulting commit/PR should trigger CI (see [the `ci_app_*` note](workflows.md#the-ci_app_-pr-ci-triggering-note)). When the image manifest configures `team_reviewers`, the token also needs organization "Members: read" to request the team reviews. |
 | `reporter_apps` | no | `""` | JSON object mapping source `owner -> {app_id, private_key}` reporter app credentials, used to check `allowed_actors` team membership against source orgs (the app needs organization "Members: read" there). |
@@ -155,6 +165,9 @@ jobs:
 | `comment_pr_number` | Source pull request the comment lands on; empty for events that carry no pull request (`release`, `workflow_dispatch`). |
 | `comment_staged_template` | Resolved comment template for a bump pull request awaiting review, unrendered — pass to [`comment_on_pr`](#comment_on_pr). |
 | `comment_deployed_template` | Resolved comment template for a landed bump, unrendered. |
+| `sync_source_ref` | Image reference the sync copies from, pinned by digest; empty when no config asked for a sync. |
+| `sync_destinations` | Newline-separated destination references the image was (or would be) copied to; empty when no config asked for a sync. |
+| `synced` | Whether the sync step actually ran to completion (`"true"`/`"false"`). `"false"` when nothing was configured, the sync was skipped (`sync: "false"`), or this was a dry run. |
 
 ## `report_deployment`
 

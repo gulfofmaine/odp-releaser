@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 
 SET_DESCRIPTION = (
     "Mapping of yamlpath expressions to templated values. "
-    "Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, and `{payload}`"
+    "Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, `{payload}`, "
+    "and `{deployed_image}` (the config's `deployed_as`, or the payload's "
+    "image name when it declares none)"
 )
 # NOTE: ``set`` fields inline ``Field(default_factory=dict)`` rather than share a
 # module-level ``Annotated`` alias so the pydantic mypy plugin can see the

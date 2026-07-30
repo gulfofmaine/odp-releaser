@@ -79,6 +79,10 @@ check's consequence at bump or dispatch time -- that's the reason it exists.
 | `kustomize_manifests[].pin: tag` but `/images[name=...]/newTag` doesn't exist | `bump-images` sets it with `mustexist=True`, which raises |
 | `dagster_user_code: true` but no matching `/deployments[image.repository=...]` entry | `bump-images` sets its tag with `mustexist=True`, which raises |
 | Referenced manifest file can't be read or parsed (unless `--no-check-files`) | `bump-images` fails the same way when it tries to load the file mid-run |
+| `deployed_as` isn't a valid image name (empty, whitespace, uppercase, contains `@`/`:`) | Used as the Helm dagster shorthand's `image.repository` selector and in `set` templating via `{deployed_image}`, so it must be a plain image name like a real payload's `image_name` |
+| `sync: true` (directly, or inherited from `defaults.sync`) with no `deployed_as` set | There is nothing for odp-releaser to copy the payload's image to |
+| A kustomize manifest's `/images[name=...]` entry has no `newName`, but `deployed_as` is set | Kustomize would still render the upstream image, not the mirror the config declares |
+| A kustomize manifest's `/images[name=...]/newName` disagrees with `deployed_as` | The manifest and the config disagree about which registry this image actually deploys from |
 
 **Warnings** (reported; fail the run only with `--strict`):
 
@@ -95,6 +99,10 @@ check's consequence at bump or dispatch time -- that's the reason it exists.
 | A `comment` is configured for an event that never carries a source pull request (anything but `push`) | There is nothing to comment on, so the comment can never be posted |
 | `comment.staged` is set but `update_mode` resolves to `commit` | A direct commit is reported as deployed immediately, so only `comment.deployed` is ever used |
 | Multiple configs matching the same event disagree on `update_mode` or a resolved setting (`environment`, `environment_url`, `reviewers`, `team_reviewers`, `comment`) | `bump-images` warns and silently uses the first config's value |
+| `deployed_as` is set to the same value as this image's own `images:` key | Redundant: `effective_deployed_name` already falls back to the `images:` key when `deployed_as` is unset, so this declares nothing new |
+| A kustomize manifest's `/images[name=...]/newName` is set but no `deployed_as` declares it | `sync` and the Helm dagster shorthand can't see this mirror |
+| A `file_manifests` `set` value hard-codes the upstream image name while `deployed_as` is set on the same config | Almost certainly meant to reference `{deployed_image}` instead — otherwise the wrong registry gets written |
+| Two configs writing the same resolved manifest path resolve different `deployed_as` values | The manifest can only agree with one mirror; at least one config is wrong about what it actually deploys |
 
 ### `deploy_targets.yaml`
 

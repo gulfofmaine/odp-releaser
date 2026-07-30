@@ -207,7 +207,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Mapping of yamlpath expressions to templated values. Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, and `{payload}`",
+          "description": "Mapping of yamlpath expressions to templated values. Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, `{payload}`, and `{deployed_image}` (the config's `deployed_as`, or the payload's image name when it declares none)",
           "title": "Set",
           "type": "object"
         }
@@ -239,7 +239,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Mapping of yamlpath expressions to templated values. Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, and `{payload}`",
+          "description": "Mapping of yamlpath expressions to templated values. Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, `{payload}`, and `{deployed_image}` (the config's `deployed_as`, or the payload's image name when it declares none)",
           "title": "Set",
           "type": "object"
         }
@@ -454,7 +454,7 @@
               "additionalProperties": {
                 "type": "string"
               },
-              "description": "Mapping of yamlpath expressions to templated values. Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, and `{payload}`",
+              "description": "Mapping of yamlpath expressions to templated values. Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, `{payload}`, and `{deployed_image}` (the config's `deployed_as`, or the payload's image name when it declares none)",
               "title": "Set",
               "type": "object"
             },
