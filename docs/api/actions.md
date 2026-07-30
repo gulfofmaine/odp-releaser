@@ -4,12 +4,14 @@ icon: lucide/blocks
 
 # Composite Actions
 
-Alongside the [reusable workflows](workflows.md), `odp-releaser` ships four
+Making up the reusable workflows ([`notify`](../source/notify.md),
+[`bump-images`](../deploy/bump_images.md), and
+[`report-merged`](../deploy/report_merged.md)), `odp-releaser` ships four
 composite GitHub Actions for deploy repos that need more control than
 `bump-images.yml` offers — most commonly to run extra steps *after* the bump
-(e.g. syncing the freshly published image to another registry) before
-anything is committed, or to report deployments and pull request comments back
-to source repos from a custom workflow.
+(e.g. syncing the freshly published image to another registry that isn't natively reported) before
+anything is committed, report deployments and pull request comments back
+to source repos from a custom workflow, or triggering additional deployment steps.
 
 The actions live in this repo and are referenced with the standard
 `owner/repo/path@ref` syntax:
@@ -39,12 +41,8 @@ pin the CLI too.
   #   install_uv: "false" # if the job already provides uv on the PATH
 ```
 
-### Inputs
-
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `install_uv` | no | `"true"` | Whether to install uv with `astral-sh/setup-uv`. Set to `"false"` when the job already provides uv on the PATH. |
-| `cache_suffix` | no | `odp-releaser-${{ github.action_ref }}` | Suffix for setup-uv's cache key, keeping the uv cache keyed to the odp-releaser version being installed. Only used when `install_uv` is `"true"`. |
+::: .github/actions/install
+    handler: github
 
 ## `bump_images`
 
@@ -70,7 +68,9 @@ Prerequisites:
   `$HOME/.docker/config.json` via the containers credential search order, so
   no separate `skopeo login` step is needed. A caller that configures a
   Docker *credential helper* instead is the exception, the credentials are
-  then not in that file, and skopeo won't resolve them.
+  then not in that file, and skopeo won't resolve them. See
+  [Syncing images](../deploy/syncing.md) for what the sync does and when to
+  ask for one.
 
 ### `stage_only`: bump without committing
 
@@ -126,48 +126,10 @@ jobs:
           git push
 ```
 
-### Inputs
+??? note "`bump_images.yml` reference"
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `client_payload` | no | `${{ toJSON(github.event.client_payload) }}` | `repository_dispatch` client_payload JSON produced by `odp-releaser notify`. Defaults to the payload of the workflow's triggering event. |
-| `config_path` | no | `.github/image_manifest.yaml` | Path to the image manifest config file. |
-| `verbosity` | no | `"1"` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
-| `git_user_name` | no | `odp-releaser[bot]` | Git author/committer name for direct commits. |
-| `git_user_email` | no | `odp-releaser[bot]@users.noreply.github.com` | Git author/committer email for direct commits. |
-| `stage_only` | no | `"false"` | When `"true"`, write the manifest changes and `git add` them, but make no commit and open no pull request. |
-| `sync` | no | `"true"` | When `"false"`, skip the image sync even for configs whose `sync: true` asks for one. The sync otherwise runs whenever the image manifest declares a `deployed_as` with `sync: true`, between writing the manifests and committing them. Requires `skopeo` and a logged in destination registry. |
-| `dry_run` | no | `"false"` | Testing aid: run the CLI with `--dry-run` (no manifest files written) and skip the stage, commit, and pull-request steps. Outputs are still produced. |
-| `token` | no | `${{ github.token }}` | Token used to push the bump commit or open the pull request. Pass an app-minted token if the resulting commit/PR should trigger CI (see [the `ci_app_*` note](workflows.md#the-ci_app_-pr-ci-triggering-note)). When the image manifest configures `team_reviewers`, the token also needs organization "Members: read" to request the team reviews. |
-| `reporter_apps` | no | `""` | JSON object mapping source `owner -> {app_id, private_key}` reporter app credentials, used to check `allowed_actors` team membership against source orgs (the app needs organization "Members: read" there). |
-| `reporter_app_id` | no | `""` | App ID of the source org's reporter GitHub App, used to check `allowed_actors` team membership. Fallback for owners not in `reporter_apps`. |
-| `reporter_app_private_key` | no | `""` | Private key matching `reporter_app_id`. |
-
-### Outputs
-
-| Output | Description |
-| --- | --- |
-| `image_name` | Image name the bump ran for (no tag or digest). |
-| `digest` | Digest (`sha256:...`) of the image the bump ran for. |
-| `new_tag` | Tag the manifests were bumped to. For a `release` event this is the release ref, not the payload's `tag` — prefer this over reading the client payload directly. |
-| `changed` | Whether any manifests changed (`"true"`/`"false"`). |
-| `update_mode` | Update mode resolved from the image manifest config (`"commit"`/`"pull_request"`). |
-| `environment` | GitHub environment name resolved from the image manifest config for deployment reporting; empty when unconfigured. |
-| `environment_url` | Deployment "View deployment" URL resolved (and templated) from the image manifest config; empty when unconfigured. |
-| `pull_request_url` | URL of the bump pull request; empty unless a `pull_request`-mode bump opened or updated one. |
-| `branch_name` | Branch name used for `pull_request` mode. |
-| `commit_message` | Generated commit message for the bump. |
-| `pr_title` | Generated pull request title for the bump. |
-| `pr_body` | Generated pull request body for the bump (includes the embedded [report metadata](#report_deployment)). |
-| `reviewers` | Comma-separated GitHub usernames requested as reviewers on the bump pull request; empty when none are configured. |
-| `team_reviewers` | Comma-separated GitHub team slugs requested as reviewers on the bump pull request; empty when none are configured. |
-| `comment_enabled` | Whether commenting back on the source pull request is enabled for this image (`"true"`/`"false"`). |
-| `comment_pr_number` | Source pull request the comment lands on; empty for events that carry no pull request (`release`, `workflow_dispatch`). |
-| `comment_staged_template` | Resolved comment template for a bump pull request awaiting review, unrendered — pass to [`comment_on_pr`](#comment_on_pr). |
-| `comment_deployed_template` | Resolved comment template for a landed bump, unrendered. |
-| `sync_source_ref` | Image reference the sync copies from, pinned by digest; empty when no config asked for a sync. |
-| `sync_destinations` | Newline-separated destination references the image was (or would be) copied to; empty when no config asked for a sync. |
-| `synced` | Whether the sync step actually ran to completion (`"true"`/`"false"`). `"false"` when nothing was configured, the sync was skipped (`sync: "false"`), or this was a dry run. |
+    ::: .github/actions/bump_images
+        handler: github
 
 ## `report_deployment`
 
@@ -194,7 +156,7 @@ Prerequisites:
 - The `odp-releaser` CLI is on the PATH — run the `install` action first
   (same sibling-action composition as `bump_images`).
 - Reporter app credentials for the source org — see
-  [GitHub Apps](github_apps.md#reporter-apps). The minted token is scoped to
+  [GitHub Apps](github_apps.md#the-reporter-role). The minted token is scoped to
   the single source repository with `deployments: write` only.
 
 A failed report exits non-zero and fails the step; wrap the action in
@@ -227,22 +189,14 @@ jobs:
           reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }}
 ```
 
-(That example is exactly what [`report-merged.yml`](workflows.md#report-merged)
+(That example is what
+[`report-merged.yml`](../deploy/report_merged.md)
 packages up — prefer the reusable workflow unless you need to customize it.)
 
-### Inputs
+??? note "`report_deployment.yml` Reference"
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `client_payload` | one of these | `""` | `repository_dispatch` client_payload JSON produced by `odp-releaser notify`. |
-| `pr_body` | one of these | `""` | Body of a merged bump pull request carrying the embedded report metadata. |
-| `update_mode` | no | `commit` | How the bump landed: `commit` reports a `success` deployment, `pull_request` reports a `queued` one. |
-| `environment` | no | `""` | GitHub environment name for the deployment. An environment embedded in `pr_body` wins; empty falls back to the deploy repo's `owner/name` slug. |
-| `environment_url` | no | `""` | "View deployment" link for the deployment status — typically the bump commit or pull request URL. A URL embedded in `pr_body` wins. |
-| `verbosity` | no | `"1"` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
-| `reporter_apps` | no | `""` | JSON object mapping source `owner -> {app_id, private_key}` reporter app credentials, for deploy repos that report to multiple source orgs. |
-| `reporter_app_id` | no | `""` | App ID of the reporter GitHub App installed on the source repos. |
-| `reporter_app_private_key` | no | `""` | Private key matching `reporter_app_id`. |
+    ::: .github/actions/report_deployment
+        handler: github
 
 ## `comment_on_pr`
 
@@ -256,7 +210,7 @@ composing your own workflow from the `bump_images` action.
 Which template is used follows `update_mode`: `pull_request` posts the `staged`
 comment (the bump is waiting on review, nothing is live), `commit` posts the
 `deployed` one. See
-[Pull request comments](config/image_manifest.md#pull-request-comments) for the
+[Pull request comments](../deploy/image_manifest.md#pull-request-comments) for the
 templates and their placeholders.
 
 Provide exactly one of:
@@ -315,22 +269,7 @@ does) when commenting should be best-effort.
     reporter_app_private_key: ${{ secrets.REPORTER_APP_PRIVATE_KEY }}
 ```
 
-### Inputs
+??? note "`comment_on_pr.yml` reference"
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `client_payload` | one of these | `""` | `repository_dispatch` client_payload JSON produced by `odp-releaser notify`. |
-| `pr_body` | one of these | `""` | Body of a merged bump pull request carrying the embedded report metadata. |
-| `update_mode` | no | `commit` | How the bump landed: `commit` posts the deployed comment, `pull_request` posts the staged one. |
-| `environment` | no | `""` | Environment named in the comment, and part of the comment's identity. An environment embedded in `pr_body` wins; empty falls back to the deploy repo's `owner/name` slug. |
-| `environment_url` | no | `""` | Available to templates as `{environment_url}`. A URL embedded in `pr_body` wins; empty falls back to `bump_url`. |
-| `bump_url` | no | `""` | Where the bump lives — the bump commit or pull request URL — available to templates as `{bump_url}`. |
-| `run_url` | no | `""` | Available to templates as `{run_url}`. Empty uses this workflow run; set it to point at a different one. |
-| `pr_number` | no | `""` | Source pull request to comment on (`bump_images`' `comment_pr_number` output). Empty falls back to the payload's own pull request; none at all is a no-op. |
-| `comment_enabled` | no | `"true"` | Whether to comment at all (`bump_images`' `comment_enabled` output). `"false"` is a no-op. |
-| `staged_template` | no | `""` | Comment body for a `pull_request`-mode bump. A template embedded in `pr_body` wins. |
-| `deployed_template` | no | `""` | Comment body for a landed bump. A template embedded in `pr_body` wins. |
-| `verbosity` | no | `"1"` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
-| `reporter_apps` | no | `""` | JSON object mapping source `owner -> {app_id, private_key}` reporter app credentials, for deploy repos that report to multiple source orgs. |
-| `reporter_app_id` | no | `""` | App ID of the reporter GitHub App installed on the source repos; needs `Pull requests: Read and write`. |
-| `reporter_app_private_key` | no | `""` | Private key matching `reporter_app_id`. |
+    ::: .github/actions/comment_on_pr
+        handler: github

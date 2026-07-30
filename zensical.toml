@@ -9,19 +9,32 @@ repo_url = "https://github.com/gulfofmaine/odp-releaser"
 docs_dir = "docs"
 nav = [
     "index.md",
-    "workflows.md",
-    "actions.md",
-    "github_apps.md",
-    "cli.md",
-    "validation.md",
-    { "Config" = [
-        "config/deploy_targets.md",
-        "config/image_manifest.md",
+    "getting-started.md",
+    { "Source Repo" = [
+        "source/index.md",
+        "source/notify.md",
+        "source/deploy_targets.md",
+        "source/github_app.md",
+    ]},
+    { "Deployment Repo" = [
+        "deploy/index.md",
+        "deploy/bump_images.md",
+        "deploy/syncing.md",
+        "deploy/report_merged.md",
+        "deploy/image_manifest.md",
+        "deploy/github_app.md",
     ]},
     { "API" = [
-        "client_payload.md",
-        "dump_event.md"
-    ]}
+        "api/github_apps.md",
+        "api/actions.md",
+        "api/cli.md",
+        "api/client_payload.md",
+    ]},
+    { "Development" = [
+        "development/index.md",
+        "development/testing.md",
+        "development/dump_event.md",
+    ]},
 ]
 
 # For Typer rendering
