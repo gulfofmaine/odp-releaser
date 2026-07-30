@@ -175,6 +175,19 @@
           "default": null,
           "description": "GitHub team slugs (no org prefix) requested as reviewers on bump pull requests. The bump-images workflow detects this key and mints its app token with organization Members: read (the ci app must be granted the permission)",
           "title": "Team Reviewers"
+        },
+        "sync": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default for whether odp-releaser copies the payload's image to a config's deployed_as before the bump lands. Overridable per image config; unset falls back to false.",
+          "title": "Sync"
         }
       },
       "title": "ConfigDefaults",
@@ -370,6 +383,32 @@
           "default": null,
           "description": "GitHub team slugs (no org prefix) requested as reviewers on the bump pull request. Replaces the defaults-level list. The bump-images workflow detects this key and mints its app token with organization Members: read",
           "title": "Team Reviewers"
+        },
+        "deployed_as": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The image name the manifests under this config actually deploy from, when it differs from the payload's image_name -- e.g. an ECR pull-through cache path such as '705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs' mirroring upstream 'gmri/sea-eagle-brown-3crs'. Used as the Helm dagster shorthand's image.repository selector and in `set` templating via `{deployed_image}`; kustomize's own `newName` already carries the mirror, so this does not change which `images:` entry kustomize matches. Per-config only",
+          "title": "Deployed As"
+        },
+        "sync": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether odp-releaser copies the payload's image to deployed_as before the bump lands. Unset or false means declare-only: the correct setting for ECR pull-through and any other registry-native replication, where there is nothing to copy because the cache populates itself on the next pull. Overrides the defaults-level value; unset inherits it, then falls back to false",
+          "title": "Sync"
         },
         "kustomize_manifests": {
           "description": "List of Kustomize manifests to set for the image",

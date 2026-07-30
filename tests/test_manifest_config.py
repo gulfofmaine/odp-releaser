@@ -15,6 +15,7 @@ from odp_releaser.schemas.manifest_config import (
     DEFAULT_STAGED_TEMPLATE,
     EXAMPLE_MANIFEST,
     CommentConfig,
+    ConfigDefaults,
     FileManifest,
     ImageConfig,
     KustomizeManifest,
@@ -149,6 +150,71 @@ def _image_with_kustomize(manifest: KustomizeManifest) -> ImageConfig:
 def test_file_manifest_requires_set() -> None:
     with pytest.raises(ValueError, match="set"):
         FileManifest.model_validate({"path": "./deployment.json"})
+
+
+# --- deployed_as / sync -------------------------------------------------------
+
+
+def test_image_config_deployed_as_and_sync_parse() -> None:
+    config = ImageConfig.model_validate(
+        {
+            "deployed_as": "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs",
+            "sync": True,
+        }
+    )
+
+    assert (
+        config.deployed_as
+        == "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs"
+    )
+    assert config.sync is True
+
+
+def test_image_config_deployed_as_and_sync_default_to_unset() -> None:
+    config = ImageConfig()
+
+    assert config.deployed_as is None
+    assert config.sync is None
+
+
+def test_deployed_as_has_no_defaults_level_counterpart() -> None:
+    """Deliberately asymmetric with every other setting on ``ImageConfig``.
+
+    A repo-wide ``deployed_as`` default would point every image at the same
+    deployed name -- a footgun, not a convenience, since two images in the
+    same config essentially never share a mirror path. So unlike ``sync``
+    (and everything else on ``ImageConfig``), ``deployed_as`` has no
+    ``ConfigDefaults`` field to inherit from at all.
+    """
+    assert "deployed_as" not in ConfigDefaults.model_fields
+    assert "deployed_as" in ImageConfig.model_fields
+
+
+def test_sync_inherits_from_defaults_via_resolve_setting() -> None:
+    config = ImageConfig(sync=None)
+    defaults = ConfigDefaults(sync=True)
+
+    assert resolve_setting(config.sync, defaults.sync) is True
+
+
+def test_sync_explicit_false_beats_true_default() -> None:
+    """An explicit ``sync: false`` on a config is a real override, not a gap.
+
+    ``resolve_setting`` only inherits on ``None`` -- an explicit empty/False
+    value replaces the default, so a config that actively wants declare-only
+    behaviour can say so even when ``defaults.sync`` is true.
+    """
+    config = ImageConfig(sync=False)
+    defaults = ConfigDefaults(sync=True)
+
+    assert resolve_setting(config.sync, defaults.sync) is False
+
+
+def test_sync_unset_with_no_default_falls_back_to_none() -> None:
+    config = ImageConfig(sync=None)
+    defaults = ConfigDefaults(sync=None)
+
+    assert resolve_setting(config.sync, defaults.sync) is None
 
 
 # --- config_matches_event / configs_for_event --------------------------------

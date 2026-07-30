@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from pydantic.json_schema import JsonSchemaValue
     from pydantic_core import CoreSchema
 
+    from odp_releaser.schemas.client_payload import ClientPayload
+
 SET_DESCRIPTION = (
     "Mapping of yamlpath expressions to templated values. "
     "Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, and `{payload}`"
@@ -325,6 +327,37 @@ class ImageConfig(BaseModel):
             ),
         ),
     ] = None
+    deployed_as: Annotated[
+        str | None,
+        Field(
+            description=(
+                "The image name the manifests under this config actually "
+                "deploy from, when it differs from the payload's "
+                "image_name -- e.g. an ECR pull-through cache path such as "
+                "'705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
+                "gmri/sea-eagle-brown-3crs' mirroring upstream "
+                "'gmri/sea-eagle-brown-3crs'. Used as the Helm dagster "
+                "shorthand's image.repository selector and in `set` "
+                "templating via `{deployed_image}`; kustomize's own "
+                "`newName` already carries the mirror, so this does not "
+                "change which `images:` entry kustomize matches. Per-config only"
+            ),
+        ),
+    ] = None
+    sync: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Whether odp-releaser copies the payload's image to "
+                "deployed_as before the bump lands. Unset or false means "
+                "declare-only: the correct setting for ECR pull-through and "
+                "any other registry-native replication, where there is "
+                "nothing to copy because the cache populates itself on the "
+                "next pull. Overrides the defaults-level value; unset "
+                "inherits it, then falls back to false"
+            ),
+        ),
+    ] = None
     # Assignment form (not Annotated) so mypy's pydantic plugin sees the
     # default_factory and treats these as optional constructor arguments.
     kustomize_manifests: list[KustomizeManifest] = Field(
@@ -419,6 +452,17 @@ class ConfigDefaults(BaseModel):
         ),
     ] = None
 
+    sync: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Default for whether odp-releaser copies the payload's "
+                "image to a config's deployed_as before the bump lands. "
+                "Overridable per image config; unset falls back to false."
+            ),
+        ),
+    ] = None
+
 
 def resolve_setting[SettingT](
     config_value: SettingT | None, default: SettingT | None
@@ -478,6 +522,30 @@ def _resolve_comment_field[FieldT](
             if value is not None:
                 return value
     return builtin
+
+
+def effective_deployed_name(image_config: ImageConfig, payload: ClientPayload) -> str:
+    """The image name ``image_config``'s manifests actually deploy from.
+
+    ``image_config.deployed_as`` when set, otherwise ``payload.image_name``.
+    Shared by ``bump_images`` (which applies this to every manifest engine
+    call), the config validator (which needs to predict the identical name a
+    real bump would use), and any CLI output that reports the deployed name
+    -- the same reason ``resolve_setting`` and :func:`config_matches_event`
+    live here rather than in ``bump_images`` itself: it lets every consumer
+    import this rule without importing ``bump_images``, which imports the
+    validator in a later step, so a hand-respelled copy anywhere else could
+    silently drift from what a real bump actually uses.
+
+    Deliberately resolved *per config*, never across configs: unlike every
+    other per-config setting ``bump_images`` resolves, this is never routed
+    through its ``_resolve_config_setting`` helper, whose "first wins, log a
+    warning" behaviour is reasonable for a disagreement over, say, an
+    environment name, but would be actively wrong here -- silently deploying
+    from one of two configs' declared registries just because it came first
+    in the list.
+    """
+    return image_config.deployed_as or payload.image_name
 
 
 def config_matches_event(image_config: ImageConfig, event: str) -> bool:
@@ -562,6 +630,15 @@ EXAMPLE_MANIFEST = ManifestConfig(
                 environment_url="https://mariners.neracoos.org",
                 reviewers=["abkfenris"],
                 team_reviewers=["mariners"],
+                # This deploy repo runs on an ECR pull-through cache mirror of
+                # the payload's image, not the upstream name itself. `sync` is
+                # left unset (false): a pull-through cache populates itself
+                # the first time something pulls the mirrored path, so there
+                # is nothing for odp-releaser to copy.
+                deployed_as=(
+                    "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
+                    "gmri/neracoos-mariners-dashboard"
+                ),
                 kustomize_manifests=[
                     KustomizeManifest(path=Path("../apps/mariners/kustomization.yaml")),
                 ],
@@ -592,6 +669,12 @@ EXAMPLE_MANIFEST = ManifestConfig(
                 comment=CommentConfig(
                     deployed="`{image_name}` `{new_tag}` is live on dev",
                 ),
+                # Unlike the production config above, this registry doesn't
+                # replicate on its own, so `sync` is set: odp-releaser copies
+                # the payload's image to `deployed_as` itself before bumping
+                # the manifests below to point at it.
+                deployed_as="ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev",
+                sync=True,
                 kustomize_manifests=[
                     KustomizeManifest(
                         path=Path("apps/mariners-dev/kustomization.yaml"),
