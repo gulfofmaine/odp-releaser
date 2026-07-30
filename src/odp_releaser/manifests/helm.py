@@ -39,6 +39,7 @@ def update_helm_values_with_payload(
     values_text: str,
     manifest: HelmManifest,
     payload: ClientPayload,
+    deployed_name: str,
     commit_message: list[str],
 ) -> str:
     """Update a Helm values file for the given payload.
@@ -48,10 +49,25 @@ def update_helm_values_with_payload(
 
     When ``manifest.dagster_user_code`` is true, the entry in the top-level
     ``deployments`` list whose ``image.repository`` matches
-    ``payload.image_name`` has its ``image.tag`` set to ``payload.new_tag()``.
-    The write uses ``mustexist=True``, so if no deployment matches, this
-    raises (mirroring the kustomize tag-pin engine, see
-    ``update_kustomize_with_payload``) instead of silently no-oping.
+    ``deployed_name`` (see :meth:`ImageConfig.deployed_name` --
+    ``ImageConfig.deployed_as`` when set, otherwise ``payload.image_name``)
+    has its ``image.tag`` set to ``payload.new_tag()``. The write uses
+    ``mustexist=True``, so if no deployment matches, this raises (mirroring
+    the kustomize tag-pin engine, see ``update_kustomize_with_payload``)
+    instead of silently no-oping.
+
+    This is the one place ``deployed_name`` (rather than
+    ``payload.image_name``) drives *which entry gets matched*, and it is
+    deliberately asymmetric with the kustomize engine: kustomize's own
+    ``newName`` field carries a mirrored image name while the ``images:``
+    entry itself stays keyed on the upstream name, so kustomize never needed
+    ``deployed_name`` for its selector. The Helm dagster shorthand has no
+    such indirection -- ``image.repository`` in the values file *is* the
+    name actually deployed -- so when a config's manifests run on a mirrored
+    image (e.g. an ECR pull-through cache path), ``image.repository`` holds
+    the mirrored name and only matching on ``deployed_name`` makes this
+    entry bumpable at all. Neither engine is wrong; they carry the mirror in
+    different places.
 
     All other content and formatting is preserved via the same ruamel
     round-trip used for kustomize manifests.
@@ -61,10 +77,10 @@ def update_helm_values_with_payload(
 
     helm_message: list[str] = []
 
-    apply_set_templates(processor, manifest.set, payload, helm_message)
+    apply_set_templates(processor, manifest.set, payload, deployed_name, helm_message)
 
     if manifest.dagster_user_code:
-        tag_path = dagster_tag_path(payload.image_name)
+        tag_path = dagster_tag_path(deployed_name)
         message = set_value(
             processor,
             tag_path,

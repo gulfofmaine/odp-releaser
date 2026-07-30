@@ -78,6 +78,7 @@ def test_tag_pin_sets_new_tag_and_leaves_no_digest() -> None:
         KUSTOMIZATION_TEXT,
         manifest,
         payload,
+        IMAGE_NAME,
         commit_message,
     )
 
@@ -99,6 +100,7 @@ def test_digest_pin_sets_digest_and_leaves_new_tag_untouched() -> None:
         KUSTOMIZATION_TEXT,
         manifest,
         payload,
+        IMAGE_NAME,
         commit_message,
     )
 
@@ -128,7 +130,47 @@ def test_digest_template_variable_is_available_in_set() -> None:
         KUSTOMIZATION_TEXT,
         manifest,
         payload,
+        IMAGE_NAME,
         commit_message,
     )
 
     assert "k8s?ref=sha256:abc123abc123abc123abc123abc123abc123" in result
+
+
+def test_deployed_as_does_not_change_which_images_entry_is_matched() -> None:
+    """A mirrored ``deployed_name`` must not steer the ``images:`` selector.
+
+    Kustomize's own ``newName`` field is what carries a mirrored image name;
+    the ``images:`` entry itself stays keyed on the upstream
+    ``payload.image_name``, so passing a different ``deployed_name`` here
+    must behave identically to passing ``payload.image_name`` itself --
+    otherwise a config with ``deployed_as`` set would never find its entry.
+    """
+    manifest = KustomizeManifest.model_validate({"path": "./kustomization.yaml"})
+    payload = _payload()
+    mirrored_name = (
+        "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
+        "gmri/neracoos-mariners-dashboard"
+    )
+
+    result_with_mirror = update_kustomize_with_payload(
+        Path("kustomization.yaml"),
+        KUSTOMIZATION_TEXT,
+        manifest,
+        payload,
+        mirrored_name,
+        [],
+    )
+    result_without_mirror = update_kustomize_with_payload(
+        Path("kustomization.yaml"),
+        KUSTOMIZATION_TEXT,
+        manifest,
+        payload,
+        IMAGE_NAME,
+        [],
+    )
+
+    # Same output regardless of deployed_name: the selector never saw it.
+    assert result_with_mirror == result_without_mirror
+    assert "name: gmri/neracoos-mariners-dashboard" in result_with_mirror
+    assert 'newTag: "7c8d9e0"' in result_with_mirror

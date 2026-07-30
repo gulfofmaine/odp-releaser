@@ -46,9 +46,10 @@ class _HasPath(Protocol):
 
 def _apply_manifest[ManifestT: _HasPath](
     manifest: ManifestT,
-    update_fn: Callable[[Path, str, ManifestT, ClientPayload, list[str]], str],
+    update_fn: Callable[[Path, str, ManifestT, ClientPayload, str, list[str]], str],
     config_path: Path,
     payload: ClientPayload,
+    deployed_name: str,
     commit_message: list[str],
     *,
     dry_run: bool,
@@ -58,14 +59,21 @@ def _apply_manifest[ManifestT: _HasPath](
     Returns ``True`` when the update changed the manifest's contents. The
     update's commit message entries are only appended to ``commit_message``
     when the contents actually changed, so unchanged manifests don't show up
-    in the audit trail.
+    in the audit trail. ``deployed_name`` (see :meth:`ImageConfig.deployed_name`)
+    is passed straight through to ``update_fn``, which each engine uses
+    differently -- see their own docstrings.
     """
     manifest_path = resolve_manifest_path(config_path, manifest.path)
     display_path = display_manifest_path(manifest_path)
     original_manifest, newline = read_manifest_text(manifest_path)
     manifest_messages: list[str] = []
     updated_manifest = update_fn(
-        display_path, original_manifest, manifest, payload, manifest_messages
+        display_path,
+        original_manifest,
+        manifest,
+        payload,
+        deployed_name,
+        manifest_messages,
     )
 
     changed = updated_manifest != original_manifest
@@ -160,6 +168,7 @@ def bump_images(
     environment_url: str | None = None
     reviewers: list[str] = []
     team_reviewers: list[str] = []
+    sync_destinations: list[str] = []
     comment = resolve_comment_config(None, config.defaults.comment)
 
     if image_configs := config.images.get(payload.image_name):
@@ -241,14 +250,19 @@ def bump_images(
             ),
             config.defaults.comment,
         )
+        sync_destinations = _resolve_sync_destinations(
+            authorized_configs, config.defaults, payload.new_tag()
+        )
 
         for image_config in authorized_configs:
+            deployed_name = image_config.deployed_name(payload.image_name)
             for kustomize_manifest in image_config.kustomize_manifests:
                 if _apply_manifest(
                     kustomize_manifest,
                     update_kustomize_with_payload,
                     config_path,
                     payload,
+                    deployed_name,
                     commit_message,
                     dry_run=dry_run,
                 ):
@@ -259,6 +273,7 @@ def bump_images(
                     update_helm_values_with_payload,
                     config_path,
                     payload,
+                    deployed_name,
                     commit_message,
                     dry_run=dry_run,
                 ):
@@ -269,6 +284,7 @@ def bump_images(
                     update_file_with_payload,
                     config_path,
                     payload,
+                    deployed_name,
                     commit_message,
                     dry_run=dry_run,
                 ):
@@ -289,11 +305,26 @@ def bump_images(
     )
     sanitized_image_name = payload.image_name.replace("/", "-")
     pr_title, pr_body = _pr_title_and_body(commit_message, metadata)
+    # `sync_source_ref` is only emitted when something will actually sync
+    # (i.e. `sync_destinations` is non-empty), matching that output's own
+    # "empty means nothing to gate on" contract rather than always populating
+    # it: a source ref with no destination is nothing a workflow step, or a
+    # human reading the logs, would have a use for.
+    sync_source_ref = (
+        f"{payload.image_name}@{payload.digest}" if sync_destinations else ""
+    )
     write_github_output(
         {
             "changed": "true" if changed else "false",
             "image_name": payload.image_name,
             "digest": payload.digest,
+            # The tag the manifests were bumped to, which for a release event
+            # is `source.ref` rather than `tag` (see `ClientPayload.new_tag`).
+            # Exposed because a caller layering its own steps on a
+            # `stage_only` bump has no other way to name the tag the bump just
+            # wrote -- reading `client_payload.tag` directly gets the release
+            # case wrong.
+            "new_tag": payload.new_tag(),
             "update_mode": update_mode,
             "environment": environment or "",
             "environment_url": environment_url or "",
@@ -310,9 +341,30 @@ def bump_images(
             "comment_pr_number": str(comment_pr_number) if comment_pr_number else "",
             "comment_staged_template": comment.staged,
             "comment_deployed_template": comment.deployed,
+            # By digest, not tag: the copy must be of the exact artifact this
+            # run just published, not whatever the tag happens to point at by
+            # the time a later workflow step runs it.
+            "sync_source_ref": sync_source_ref,
+            # Newline-delimited `<deployed_as>:<new_tag>` entries, one per
+            # distinct sync-enabled authorized config -- see
+            # `_resolve_sync_destinations` for why every declared destination
+            # gets copied to rather than just the first.
+            "sync_destinations": "\n".join(sync_destinations),
         }
     )
-    write_step_summary(f"# {'\n'.join(commit_message)}")
+    summary_lines = [f"# {'\n'.join(commit_message)}"]
+    if sync_destinations:
+        summary_lines.append("")
+        # Future tense, deliberately. This runs before the action's sync step,
+        # so the copy has not happened yet -- and this process cannot know
+        # whether it ever will: `--dry-run` and the action's `sync: false`
+        # input both skip that step, and neither is visible from here. Past
+        # tense here claimed a copy that never happened.
+        summary_lines.append(
+            f"Configured to sync `{payload.image_name}@{payload.digest}` to: "
+            + ", ".join(f"`{destination}`" for destination in sync_destinations)
+        )
+    write_step_summary("\n".join(summary_lines))
 
 
 def _preflight(
@@ -390,6 +442,45 @@ def _resolve_config_setting[SettingT](
             f"{image_name}: {distinct}; using {values[0]!r}"
         )
     return values[0]
+
+
+def _resolve_sync_destinations(
+    authorized_configs: list[ImageConfig],
+    defaults: ConfigDefaults,
+    new_tag: str,
+) -> list[str]:
+    """Every distinct sync-enabled destination across the authorized configs.
+
+    Deliberately *not* routed through :func:`_resolve_config_setting`. That
+    helper's "first wins, log a warning" handling is the right call for a
+    disagreement over a single value like ``environment`` -- there is only
+    one environment to report. Sync destinations are not that: two authorized
+    configs that both resolve ``sync`` true with different ``deployed_as``
+    values are two independent registries that each expect a copy of this
+    image, not two opinions about one setting. Mirroring to only the first
+    (silently, or behind nothing louder than a warning) would leave the
+    second registry serving a stale or missing tag until something else
+    happens to notice -- an outage generator, not a convenience. So every
+    authorized config that resolves ``sync`` true *and* has a ``deployed_as``
+    contributes its own ``<deployed_as>:<new_tag>`` destination, and the
+    caller copies to all of them.
+
+    Two configs that declare the *same* destination are deduplicated, in
+    config order -- that is one registry path being written to twice, not two
+    -- using the same dedupe-preserving-order idiom as
+    ``_resolve_config_setting``.
+    """
+    destinations = [
+        f"{image_config.deployed_as}:{new_tag}"
+        for image_config in authorized_configs
+        if resolve_setting(image_config.sync, defaults.sync)
+        and image_config.deployed_as
+    ]
+    return [
+        destination
+        for i, destination in enumerate(destinations)
+        if destination not in destinations[:i]
+    ]
 
 
 def _config_authorizes(

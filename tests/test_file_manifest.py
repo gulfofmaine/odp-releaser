@@ -51,7 +51,12 @@ def test_yaml_file_manifest_applies_set_templates() -> None:
     commit_message: list[str] = []
 
     result = update_file_with_payload(
-        path, path.read_text(encoding="utf-8"), manifest, payload, commit_message
+        path,
+        path.read_text(encoding="utf-8"),
+        manifest,
+        payload,
+        IMAGE_NAME,
+        commit_message,
     )
 
     assert "image: gmri/example:7c8d9e0" in result
@@ -73,7 +78,12 @@ def test_json_file_manifest_stays_valid_json_with_stable_formatting() -> None:
     commit_message: list[str] = []
 
     result = update_file_with_payload(
-        path, path.read_text(encoding="utf-8"), manifest, payload, commit_message
+        path,
+        path.read_text(encoding="utf-8"),
+        manifest,
+        payload,
+        IMAGE_NAME,
+        commit_message,
     )
 
     # Output must round-trip as JSON with the templated values applied.
@@ -90,6 +100,69 @@ def test_json_file_manifest_stays_valid_json_with_stable_formatting() -> None:
     # Stable 2-space indentation and a trailing newline.
     assert result.endswith("\n")
     assert '\n  "apiVersion": "apps/v1"' in result
+
+
+def test_deployed_image_template_renders_the_mirrored_name() -> None:
+    """``{deployed_image}`` lets a file manifest reference the deployed name.
+
+    Unlike ``{new_tag}``/``{git_sha}``/``{digest}``, this placeholder isn't
+    read off the payload -- it's ``ImageConfig.deployed_as`` when set,
+    otherwise the payload's own ``image_name`` (see
+    ``ImageConfig.deployed_name``).
+    """
+    path = FIXTURE_DIR / "deployment.yaml"
+    mirrored_name = (
+        "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/example"
+    )
+    manifest = FileManifest.model_validate(
+        {
+            "path": "./deployment.yaml",
+            "set": {
+                "/spec/template/spec/containers[0]/image": "{deployed_image}@{digest}",
+            },
+        }
+    )
+    payload = _payload()
+    commit_message: list[str] = []
+
+    result = update_file_with_payload(
+        path,
+        path.read_text(encoding="utf-8"),
+        manifest,
+        payload,
+        mirrored_name,
+        commit_message,
+    )
+
+    assert (
+        f"image: {mirrored_name}@sha256:abc123abc123abc123abc123abc123abc123" in result
+    )
+
+
+def test_deployed_image_falls_back_to_payload_name_when_deployed_as_is_unset() -> None:
+    """With no ``deployed_as`` configured, ``{deployed_image}`` is the payload's own name."""
+    path = FIXTURE_DIR / "deployment.yaml"
+    manifest = FileManifest.model_validate(
+        {
+            "path": "./deployment.yaml",
+            "set": {
+                "/spec/template/spec/containers[0]/image": "{deployed_image}@{digest}",
+            },
+        }
+    )
+    payload = _payload()
+    commit_message: list[str] = []
+
+    result = update_file_with_payload(
+        path,
+        path.read_text(encoding="utf-8"),
+        manifest,
+        payload,
+        IMAGE_NAME,
+        commit_message,
+    )
+
+    assert f"image: {IMAGE_NAME}@sha256:abc123abc123abc123abc123abc123abc123" in result
 
 
 def test_open_for_editing_raises_on_invalid_yaml() -> None:

@@ -6,8 +6,7 @@ disagreeing setting isn't a property of any one config in isolation -- it's a
 collision or disagreement *between* sibling configs that ``bump_images``
 groups together by matching event before resolving settings or applying
 manifests. The checks here group the same way, so they can see what
-``bump_images`` itself sees. Split out of ``image_manifest`` purely to keep
-that module under the project's line-count budget; the two are one feature.
+``bump_images`` itself sees.
 """
 
 from __future__ import annotations
@@ -18,7 +17,6 @@ from typing import TYPE_CHECKING, get_args
 from odp_releaser.manifests.helpers import resolve_manifest_path
 from odp_releaser.schemas.manifest_config import (
     ImageConfig,
-    config_matches_event,
     resolve_comment_config,
     resolve_setting,
 )
@@ -34,7 +32,7 @@ if TYPE_CHECKING:
         KustomizeManifest,
     )
     from odp_releaser.validation.diagnostics import Diagnostics
-    from odp_releaser.validation.image_manifest import ConfigLocation
+    from odp_releaser.validation.location import ConfigLocation
 
 # The settings ``bump_images`` resolves per matching config (falling back to
 # `defaults` via `resolve_setting`) and warns about when matching configs for
@@ -91,7 +89,7 @@ def check_cross_config(
         indices = frozenset(
             index
             for index, image_config in enumerate(image_configs)
-            if config_matches_event(image_config, event)
+            if image_config.matches_event(event)
         )
         if not indices or indices in seen_groups:
             continue
@@ -121,17 +119,37 @@ def _check_duplicate_manifest_targets(
     location: ConfigLocation,
     diagnostics: Diagnostics,
 ) -> None:
-    """Warn when the same resolved manifest path is targeted more than once for one event."""
+    """Warn on duplicate manifest targets, and on those targets' configs disagreeing on ``deployed_as``.
+
+    Both checks walk the exact same per-config, per-manifest grouping (by
+    resolved path), so they're computed together in one pass rather than
+    walking the same manifests twice:
+
+    - The same resolved path targeted more than once for one event is
+      redundant -- ``bump-images`` applies every one of them.
+    - The same resolved path targeted by configs that resolve *different*
+      ``deployed_as`` values is worse than redundant: unlike
+      :data:`_AGREEMENT_ATTRS`, differing ``deployed_as`` across configs is
+      normal in general (it's resolved per config, never across them --
+      see :meth:`ImageConfig.deployed_name`'s docstring) -- but a single manifest
+      file (a kustomize ``newName``, a Helm ``image.repository``) can only
+      agree with one mirror name at a time, so two configs writing the same
+      file while claiming different mirrors means at least one of them is
+      wrong about what that manifest actually deploys.
+    """
     counts: dict[Path, int] = {}
+    deployed_as_by_path: dict[Path, set[str]] = {}
     for image_config in matching:
         manifests: list[KustomizeManifest | HelmManifest | FileManifest] = [
             *image_config.kustomize_manifests,
             *image_config.helm_charts,
             *image_config.file_manifests,
         ]
+        deployed_as = image_config.deployed_name(image_name)
         for manifest in manifests:
             resolved = resolve_manifest_path(config_path, manifest.path)
             counts[resolved] = counts.get(resolved, 0) + 1
+            deployed_as_by_path.setdefault(resolved, set()).add(deployed_as)
 
     for resolved, count in counts.items():
         if count > 1:
@@ -139,6 +157,17 @@ def _check_duplicate_manifest_targets(
                 f"{resolved} is targeted {count} times by configs "
                 f"matching event {event!r} for image {image_name!r}; "
                 "bump-images will apply all of them, redundantly",
+                location=location.location,
+                line=location.line,
+            )
+
+    for resolved, deployed_names in deployed_as_by_path.items():
+        if len(deployed_names) > 1:
+            diagnostics.warning(
+                f"{resolved} is targeted by configs matching event {event!r} "
+                f"for image {image_name!r} that resolve different "
+                f"deployed_as values ({sorted(deployed_names)}); the "
+                "manifest can only agree with one of them",
                 location=location.location,
                 line=location.line,
             )

@@ -182,6 +182,10 @@ concurrency:
 
 jobs:
   bump:
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write # required even if this deploy repo never syncs
     uses: gulfofmaine/odp-releaser/.github/workflows/bump-images.yml@<sha-or-tag>
     with:
       # config_path: .github/image_manifest.yaml            # optional
@@ -213,6 +217,9 @@ succession.
 | `verbosity` | no | `1` | CLI verbosity: `0`=warning, `1`=info (default), `2`+=debug. Maps to the CLI's `-v`/`-vv`/`-vvv` flags (capped at 3). |
 | `client_payload` | no | `""` | Testing aid: explicit `client_payload` JSON string. Empty uses the triggering `repository_dispatch` event's payload. |
 | `dry_run` | no | `false` | Testing aid: run the CLI with `--dry-run` (no manifest files written) and skip the commit and pull-request steps. Outputs are still produced. |
+| `sync` | no | `true` | Set `false` to skip the image sync even for configs whose `sync: true` asks for one. Only relevant when the image manifest declares a `deployed_as` with `sync: true`. |
+| `sync_aws_role_arn` | no | `""` | IAM role to assume via OIDC before syncing, for an ECR destination. When set, this workflow runs `configure-aws-credentials` and `amazon-ecr-login` before the bump. Not a secret — see [Syncing to ECR via OIDC](#syncing-to-ecr-via-oidc). |
+| `sync_aws_region` | no | `""` | AWS region for `sync_aws_role_arn`. |
 
 ### Secrets
 
@@ -223,6 +230,12 @@ succession.
 | `reporter_app_id` | no | App ID of the source org's reporter GitHub App. When set, a successful bump is reported back to the source repo as a GitHub deployment + status, and `allowed_actors` team membership is checked with it (needs organization "Members: read"). |
 | `reporter_app_private_key` | no | Private key matching `reporter_app_id`. |
 | `reporter_apps` | no | JSON object mapping source `owner -> {app_id, private_key}` for reporting to (and checking `allowed_actors` teams against) source repos across multiple orgs. |
+| `sync_registry` | no | Registry host to `docker login` to before syncing, for a destination that uses username/password auth (GHCR, Docker Hub). Leave unset when using `sync_aws_role_arn`, or when no config asks for a sync. |
+| `sync_username` | no | Username for `sync_registry`. |
+| `sync_password` | no | Password or token for `sync_registry`. |
+| `sync_source_registry` | no | Registry host to `docker login` to for the *source* side of a sync. Needed when the image is pulled from a private registry on a different host than the destination, or from Docker Hub, where an anonymous pull shares the runner IP's rate limit. |
+| `sync_source_username` | no | Username for `sync_source_registry`. |
+| `sync_source_password` | no | Password or token for `sync_source_registry`. |
 
 ### Outputs
 
@@ -243,6 +256,8 @@ succession.
 | `comment_pr_number` | Source pull request the comment lands on; empty for events that carry no pull request (`release`, `workflow_dispatch`). |
 | `comment_staged_template` | Resolved comment template for a bump pull request awaiting review, unrendered. |
 | `comment_deployed_template` | Resolved comment template for a landed bump, unrendered. |
+| `sync_destinations` | Newline-separated destination references the image was copied to; empty when no config asked for a sync. |
+| `synced` | Whether the image sync actually ran (`"true"`/`"false"`). |
 
 Follow-up jobs in the calling workflow can consume these, e.g.:
 
@@ -363,6 +378,103 @@ deploy org's own dispatch app credentials — makes the workflow mint that
 token before checkout, so the pushed commit and/or opened PR is authored by
 your app and does trigger CI. See [GitHub Apps](github_apps.md#5-wire-your-own-app-into-bump-imagesyml-pr-mode-ci-trigger)
 for how to obtain and wire those credentials.
+
+### Syncing images to another registry
+
+When an image manifest declares a `deployed_as` with `sync: true` (see
+[Deploying from a mirrored registry](config/image_manifest.md#deploying-from-a-mirrored-registry)),
+the [`bump_images` action](actions.md#bump_images) copies the image to that
+registry itself, between writing the manifests and committing them, using
+`skopeo copy --all --preserve-digests`. A failed copy fails the bump, on
+purpose as a merged manifest pointing at an image nobody pushed is an outage.
+
+**Leave `sync` unset (or don't set `deployed_as` at all) for registry-native
+replication** — an ECR pull-through cache being the common case here. A
+pull-through cache populates itself the first time something pulls the
+mirrored path, and there is no way to push into one directly, so there is
+nothing for `sync` to do. Only set `sync: true` when the destination registry
+needs the image actively pushed to it (GHCR, Docker Hub, or a plain,
+non-pull-through ECR repository).
+
+Set the `sync` input to `false` on the calling job to disable the sync
+workflow-wide, as a kill switch independent of what any individual image
+manifest declares.
+
+Provide destination credentials one of two ways:
+
+- `sync_aws_role_arn` (+ `sync_aws_region`) for an ECR destination reached via
+  OIDC — see below.
+- `sync_registry` / `sync_username` / `sync_password` secrets for a
+  destination that uses plain username/password auth (GHCR, Docker Hub).
+
+The copy also has to **pull**, and the source is the upstream registry the
+payload names, which is often not the destination host. Set
+`sync_source_registry` / `sync_source_username` / `sync_source_password` when
+that source needs credentials the runner doesn't already have: a private
+registry, or Docker Hub, where an anonymous pull draws on the shared runner
+IP's rate limit. Because a failed copy fails the bump by design, an
+unauthenticated source turns a rate limit into a blocked release.
+
+!!! warning "A rejected bump PR still occupies the destination tag"
+
+    In `pull_request` mode the copy happens before the PR opens, so an
+    abandoned or rejected bump leaves `deployed_as:<tag>` populated. On a
+    tag-immutable destination (ECR, or GHCR with immutability enabled), a
+    later dispatch of a *different* digest to that same tag can then never be
+    synced: the push is rejected, and the skip-if-already-there check does not
+    apply because the digests differ. Re-dispatching the *same* digest is
+    fine, which is the case the skip check covers. Deleting the orphaned tag
+    is currently manual.
+
+#### Syncing to ECR via OIDC
+
+Set `sync_aws_role_arn` (and `sync_aws_region`) to have this workflow assume
+an IAM role via OIDC and log in to ECR before the bump runs — no long-lived
+AWS credentials stored as secrets. This is why every caller now needs
+`id-token: write`, whether or not it actually syncs.
+
+!!! warning "`id-token: write` is a real privilege grant, not just a checkbox"
+
+    Granting it means every step in that job can mint an OIDC token scoped to
+    the calling repository, including this workflow's own steps and any action
+    they call. Anything that trusts your repo's OIDC subject is therefore
+    reachable from that job. `permissions` cannot be made conditional, so a
+    caller that never syncs still has to grant it to call this workflow at all.
+    If that trade isn't acceptable, compose the
+    [`bump_images` action](actions.md#bump_images) directly in your own
+    workflow instead, where you decide the job's permissions.
+
+The role's trust policy keys on the **calling** repo, not on this reusable
+workflow:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:my-org/my-deploy-repo:*"
+        }
+      }
+    }
+  ]
+}
+```
+
+The OIDC subject claim (`sub`) describes the workflow **run's repository** (the deploy repo that called `bump-images.yml`) even though the actual
+`aws-actions/configure-aws-credentials` login runs inside this reusable
+workflow. So each deploy repo gets its own tightly scoped role keyed on
+`repo:<that repo>:*`, and nothing needs to trust every caller of this shared
+workflow via `job_workflow_ref`.
 
 ## Report merged
 

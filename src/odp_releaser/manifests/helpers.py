@@ -119,18 +119,26 @@ def apply_set_templates(
     processor: Processor,
     set_paths: dict[str, str],
     payload: ClientPayload,
+    deployed_name: str,
     commit_message: list[str],
 ) -> None:
     """Apply each ``manifest.set`` path/value onto ``processor``.
 
     Values are templated with ``{new_tag}``, ``{git_sha}`` and ``{digest}``
-    drawn from ``payload``. A missing template variable raises a ``KeyError``
-    wrapped with the offending path and value to aid debugging. Each applied
-    change is appended to ``commit_message``.
+    drawn from ``payload``, plus ``{deployed_image}`` -- the name the
+    manifests actually deploy from (``ImageConfig.deployed_as`` when set,
+    otherwise the payload's own ``image_name``; see
+    :meth:`ImageConfig.deployed_name`, the single place that rule is
+    computed). ``{deployed_image}`` lets a ``file_manifests`` entry write
+    e.g. ``"{deployed_image}@{digest}"`` instead of a hand-typed mirror
+    registry path. A missing template variable raises a ``KeyError`` wrapped
+    with the offending path and value to aid debugging. Each applied change
+    is appended to ``commit_message``.
     """
+    format_kwargs = payload.value_format_kwargs() | {"deployed_image": deployed_name}
     for set_path, value in set_paths.items():
         try:
-            formatted_value = value.format(**payload.value_format_kwargs())
+            formatted_value = value.format(**format_kwargs)
         except KeyError as e:
             msg = f"Error setting value for path '{set_path}' with value '{value}'"
             raise KeyError(msg) from e

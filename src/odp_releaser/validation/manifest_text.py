@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from odp_releaser.validation.diagnostics import Diagnostics
-    from odp_releaser.validation.image_manifest import ConfigLocation
+    from odp_releaser.validation.location import ConfigLocation
 
 
 def load_manifest_text(

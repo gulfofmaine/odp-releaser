@@ -16,7 +16,9 @@ if TYPE_CHECKING:
 
 SET_DESCRIPTION = (
     "Mapping of yamlpath expressions to templated values. "
-    "Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, and `{payload}`"
+    "Values may reference `{new_tag}`, `{git_sha}`, `{digest}`, `{payload}`, "
+    "and `{deployed_image}` (the config's `deployed_as`, or the payload's "
+    "image name when it declares none)"
 )
 # NOTE: ``set`` fields inline ``Field(default_factory=dict)`` rather than share a
 # module-level ``Annotated`` alias so the pydantic mypy plugin can see the
@@ -325,6 +327,37 @@ class ImageConfig(BaseModel):
             ),
         ),
     ] = None
+    deployed_as: Annotated[
+        str | None,
+        Field(
+            description=(
+                "The image name the manifests under this config actually "
+                "deploy from, when it differs from the payload's "
+                "image_name -- e.g. an ECR pull-through cache path such as "
+                "'705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
+                "gmri/sea-eagle-brown-3crs' mirroring upstream "
+                "'gmri/sea-eagle-brown-3crs'. Used as the Helm dagster "
+                "shorthand's image.repository selector and in `set` "
+                "templating via `{deployed_image}`; kustomize's own "
+                "`newName` already carries the mirror, so this does not "
+                "change which `images:` entry kustomize matches. Per-config only"
+            ),
+        ),
+    ] = None
+    sync: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Whether odp-releaser copies the payload's image to "
+                "deployed_as before the bump lands. Unset or false means "
+                "declare-only: the correct setting for ECR pull-through and "
+                "any other registry-native replication, where there is "
+                "nothing to copy because the cache populates itself on the "
+                "next pull. Overrides the defaults-level value; unset "
+                "inherits it, then falls back to false"
+            ),
+        ),
+    ] = None
     # Assignment form (not Annotated) so mypy's pydantic plugin sees the
     # default_factory and treats these as optional constructor arguments.
     kustomize_manifests: list[KustomizeManifest] = Field(
@@ -339,6 +372,26 @@ class ImageConfig(BaseModel):
         description="List of generic YAML or JSON manifests updated via set paths",
         default_factory=list,
     )
+
+    def matches_event(self, event: str) -> bool:
+        """Whether this config applies to ``event``; ``events: None`` matches every event."""
+        events = self.events
+        if events is None:
+            return True
+        # mypy is happy with this; pylint's pydantic plugin misinfers the field
+        # type once it is read off `self`, so the membership test reads as
+        # invalid to it. The equivalent module-level function did not trip it.
+        return event in events  # pylint: disable=unsupported-membership-test
+
+    def deployed_name(self, upstream: str) -> str:
+        """``deployed_as`` when set, otherwise ``upstream``.
+
+        Resolved per config, not across configs: unlike other per-config
+        settings, this is deliberately never routed through
+        ``bump_images._resolve_config_setting``, whose first-wins-and-warn
+        behaviour would silently pick one of two configs' registries.
+        """
+        return self.deployed_as or upstream
 
 
 class ConfigDefaults(BaseModel):
@@ -419,6 +472,17 @@ class ConfigDefaults(BaseModel):
         ),
     ] = None
 
+    sync: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Default for whether odp-releaser copies the payload's "
+                "image to a config's deployed_as before the bump lands. "
+                "Overridable per image config; unset falls back to false."
+            ),
+        ),
+    ] = None
+
 
 def resolve_setting[SettingT](
     config_value: SettingT | None, default: SettingT | None
@@ -480,20 +544,6 @@ def _resolve_comment_field[FieldT](
     return builtin
 
 
-def config_matches_event(image_config: ImageConfig, event: str) -> bool:
-    """Whether ``image_config`` applies to ``event``.
-
-    An ``events: None`` config matches every event; otherwise ``event`` must
-    be explicitly listed. This is the exact filter ``bump_images`` applies to
-    an image's configs, before resolving any setting or applying any
-    manifest, so the validator must use this same predicate rather than
-    re-spell it -- otherwise a future change to the event-matching rule could
-    land on one side only, leaving the validator checking a different set of
-    configs than the ones a real run would apply.
-    """
-    return image_config.events is None or event in image_config.events
-
-
 def configs_for_event(
     image_configs: Iterable[ImageConfig], event: str
 ) -> list[ImageConfig]:
@@ -501,7 +551,7 @@ def configs_for_event(
     return [
         image_config
         for image_config in image_configs
-        if config_matches_event(image_config, event)
+        if image_config.matches_event(event)
     ]
 
 
@@ -562,6 +612,15 @@ EXAMPLE_MANIFEST = ManifestConfig(
                 environment_url="https://mariners.neracoos.org",
                 reviewers=["abkfenris"],
                 team_reviewers=["mariners"],
+                # This deploy repo runs on an ECR pull-through cache mirror of
+                # the payload's image, not the upstream name itself. `sync` is
+                # left unset (false): a pull-through cache populates itself
+                # the first time something pulls the mirrored path, so there
+                # is nothing for odp-releaser to copy.
+                deployed_as=(
+                    "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
+                    "gmri/neracoos-mariners-dashboard"
+                ),
                 kustomize_manifests=[
                     KustomizeManifest(path=Path("../apps/mariners/kustomization.yaml")),
                 ],
@@ -592,6 +651,12 @@ EXAMPLE_MANIFEST = ManifestConfig(
                 comment=CommentConfig(
                     deployed="`{image_name}` `{new_tag}` is live on dev",
                 ),
+                # Unlike the production config above, this registry doesn't
+                # replicate on its own, so `sync` is set: odp-releaser copies
+                # the payload's image to `deployed_as` itself before bumping
+                # the manifests below to point at it.
+                deployed_as="ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev",
+                sync=True,
                 kustomize_manifests=[
                     KustomizeManifest(
                         path=Path("apps/mariners-dev/kustomization.yaml"),

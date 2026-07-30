@@ -67,6 +67,12 @@ for key, value in payload.value_format_kwargs().items():
         print(f"- `{key}` - `{value}`")
 ```
 
+One additional placeholder isn't in that list because it isn't part of the
+payload: `{deployed_image}`, the name this config's manifests actually deploy
+from (`deployed_as` when set, otherwise the payload's own `image_name`). See
+[Deploying from a mirrored registry](#deploying-from-a-mirrored-registry)
+below.
+
 ```md exec="true" updatetoc="false"
 ::: odp_releaser.schemas.manifest_config.KustomizeManifest
     options:
@@ -93,6 +99,130 @@ for key, value in payload.value_format_kwargs().items():
       - griffe_pydantic
       skip_local_inventory: true
 ```
+
+### Deploying from a mirrored registry
+
+Every manifest engine keys its update off the payload's own `image_name` by
+default. Two `ImageConfig` settings change that when a deploy repo doesn't
+deploy the payload's image name verbatim -- most commonly because it pulls
+through a registry-native mirror instead of the upstream registry:
+
+- **`deployed_as`** -- the image name the manifests under *this config*
+  actually deploy from, when it differs from the payload's `image_name`.
+  E.g. an ECR pull-through cache path such as
+  `705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs`
+  mirroring upstream `gmri/sea-eagle-brown-3crs`. Unset falls back to the
+  payload's `image_name`.
+- **`sync`** (default `false`) -- whether odp-releaser should actually copy
+  the payload's image to `deployed_as` before the bump is committed. See
+  [Syncing images to another registry](../workflows.md#syncing-images-to-another-registry)
+  for what runs and where credentials come from.
+
+**`deployed_as` is deliberately per-config only.** Unlike every other setting
+on `ImageConfig`, there is no `defaults.deployed_as`.
+
+#### The common case: declare-only, no `sync`
+
+Registry-native replication, an ECR pull-through cache being the usual
+example here, populates itself the first time something pulls the
+mirrored path, and a pull-through cache repository can't be pushed into at
+all. So that is configured with `deployed_as` without `sync`:
+
+```yaml
+images:
+  gmri/sea-eagle-brown-3crs:
+    - events: [push]
+      deployed_as: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs
+      kustomize_manifests:
+        - ./kustomization.yaml
+      helm_charts:
+        - path: ./values.yaml
+          dagster_user_code: true
+```
+
+#### Active mirroring: `sync: true`
+
+When the destination registry does *not* replicate on its own (GHCR, Docker
+Hub, or an ECR repository that isn't a pull-through cache), set `sync: true`
+so odp-releaser copies the image, before the bump is committed:
+
+```yaml
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev
+      sync: true
+      kustomize_manifests:
+        - path: apps/mariners-dev/kustomization.yaml
+          pin: digest
+```
+
+A failed copy fails the bump. See
+[Syncing images to another registry](../workflows.md#syncing-images-to-another-registry)
+for the mechanics (`skopeo copy --all --preserve-digests`, a post-copy digest
+check, skipping a destination that already carries the digest) and how to
+wire up credentials.
+
+#### Kustomize vs. Helm: where the mirror name lives
+
+The two manifest engines carry a mirrored name in different places, so
+`deployed_as` interacts with each differently -- this is the one thing worth
+understanding well before relying on either:
+
+- **Kustomize** keeps matching `/images[name="<payload image_name>"]` --
+  the `images:` entry itself always stays keyed on the *upstream* name.
+  Kustomize's own `newName` field is the mirror, so
+  `deployed_as` must equal that entry's `newName`:
+
+  ```yaml
+  images:
+    - name: gmri/sea-eagle-brown-3crs # upstream name -- always the match key
+      newName: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs # must equal deployed_as
+      newTag: "ee1cadc"
+  ```
+
+  [`odp-releaser validate image-manifest`](../validation.md) checks this
+  agreement: a missing or disagreeing `newName` is an error, and a `newName`
+  with no `deployed_as` declared is a warning (the mirror would then be
+  invisible to `sync` and to the Helm shorthand below).
+
+- **The Helm dagster user-deployments shorthand** (`dagster_user_code: true`)
+  instead matches `/deployments[image.repository="<deployed_as>"]`, because
+  that chart's values layout has no `newName` equivalent -- `image.repository`
+  *is* the deployed name. Before `deployed_as` existed, a values file whose
+  `image.repository` already named a mirror could not be bumped at all:
+  nothing selected it.
+
+A config with both a kustomize manifest and a dagster-shorthand Helm manifest
+for the same mirrored image needs no special coordination: `deployed_as` is
+the one setting both engines key off, each in the place that engine actually
+carries a mirror.
+
+#### The `{deployed_image}` placeholder
+
+`set` values -- on any of the three manifest types -- can also reference
+`{deployed_image}`, the same name just described (`deployed_as` when set,
+otherwise the payload's own `image_name`). This lets a `file_manifests` entry
+write the mirror registry directly instead of hand-typing it:
+
+```yaml
+file_manifests:
+  - path: ../apps/config/deployment.json
+    set:
+      /spec/template/spec/containers[0]/image: "{deployed_image}@{digest}"
+```
+
+[`odp-releaser validate image-manifest`](../validation.md) warns when a `set`
+value hard-codes the *upstream* image name literally on a config that also
+sets `deployed_as` -- almost always meant to be `{deployed_image}` instead.
+
+!!! note "A shape limitation: no registry ports"
+
+    `deployed_as` follows the same shape rule as an `images:` key: non-empty,
+    trimmed, lowercase, and free of `@` and `:`. That last rule means a registry
+    host with an explicit port (`registry.example.com:5000/foo`) currently can't
+    be expressed as a `deployed_as` -- the same pre-existing limitation an
+    `images:` key and a payload `image_name` already share.
 
 ### Pull request comments
 

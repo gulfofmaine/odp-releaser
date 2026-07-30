@@ -14,6 +14,15 @@
 #     action first. (A composite action cannot reference a sibling local
 #     action itself: relative `uses:` paths resolve against the workflow's
 #     workspace, not the action's repo — see actions/runner#1348.)
+#   - Only when the image manifest asks for a sync (`deployed_as` with
+#     `sync: true`): `skopeo` on the PATH — preinstalled on GitHub-hosted
+#     ubuntu runners — and the destination registry already logged in to by
+#     an earlier step (docker/login-action, or configure-aws-credentials +
+#     amazon-ecr-login). skopeo reads those credentials from
+#     $HOME/.docker/config.json via the containers credential search order,
+#     so no separate `skopeo login` is needed. A caller that configures a
+#     Docker *credential helper* instead is the exception — the credentials
+#     are then not in that file, and skopeo won't resolve them.
 #
 # Minimal caller example:
 #
@@ -63,6 +72,15 @@ inputs:
       The image's update_mode is ignored.
     required: false
     default: "false"
+  sync:
+    description: >-
+      When "false", skip the image sync even for configs whose `sync: true` asks
+      for one. The sync otherwise runs whenever the image manifest declares a
+      `deployed_as` with `sync: true`, before the bump is committed. Requires
+      `skopeo` (preinstalled on GitHub-hosted ubuntu runners) and credentials
+      for the destination registry already established by an earlier login step.
+    required: false
+    default: "true"
   dry_run:
     description: >-
       When "true", run the CLI with --dry-run (no manifest files written) and
@@ -105,6 +123,12 @@ outputs:
   digest:
     description: Digest (sha256:...) of the image the bump ran for.
     value: ${{ steps.bump.outputs.digest }}
+  new_tag:
+    description:
+      Tag the manifests were bumped to. For a release event this is the release
+      ref, not the payload's `tag`, so prefer this over reading the client
+      payload directly.
+    value: ${{ steps.bump.outputs.new_tag }}
   changed:
     description: Whether any manifests changed ("true"/"false").
     value: ${{ steps.bump.outputs.changed }}
@@ -168,6 +192,21 @@ outputs:
   comment_deployed_template:
     description: Resolved comment template for a landed bump, unrendered.
     value: ${{ steps.bump.outputs.comment_deployed_template }}
+  sync_source_ref:
+    description:
+      Image reference the sync copies from, pinned by digest; empty when no
+      config asked for a sync.
+    value: ${{ steps.bump.outputs.sync_source_ref }}
+  sync_destinations:
+    description:
+      Newline-separated destination references the image was (or would be)
+      copied to; empty when no config asked for a sync.
+    value: ${{ steps.bump.outputs.sync_destinations }}
+  synced:
+    description:
+      Whether the sync step actually ran to completion ("true"/"false"). False
+      when nothing was configured, the sync was skipped, or this was a dry run.
+    value: ${{ steps.sync.outputs.synced || 'false' }}
 
 runs:
   using: composite
@@ -202,6 +241,84 @@ runs:
           BUMP_ARGS+=(--dry-run)
         fi
         odp-releaser "${FLAGS[@]}" bump-images "${BUMP_ARGS[@]}"
+
+    # Deliberately between the bump and every step that publishes it. A
+    # merged manifest pointing at an image nobody pushed is an outage, so
+    # unlike the deployment report and the source-PR comment (both
+    # continue-on-error, both cosmetic) a failed sync has to fail the bump —
+    # which only helps if it runs before the commit or pull request lands.
+    #
+    # Inlined here rather than in a sibling `sync_image` action because a
+    # composite action cannot `uses:` one (see the note at the top of this
+    # file), and the ordering above is the whole point.
+    - name: Sync image to the deploy registries
+      id: sync
+      if:
+        inputs.dry_run != 'true' && inputs.sync != 'false' &&
+        steps.bump.outputs.sync_destinations != ''
+      shell: bash
+      env:
+        SOURCE_REF: ${{ steps.bump.outputs.sync_source_ref }}
+        DESTINATIONS: ${{ steps.bump.outputs.sync_destinations }}
+        EXPECTED_DIGEST: ${{ steps.bump.outputs.digest }}
+      run: |
+        set -euo pipefail
+
+        if ! command -v skopeo >/dev/null; then
+          echo "::error::skopeo not found on the PATH; it is preinstalled on" \
+            "GitHub-hosted ubuntu runners, so a self-hosted runner needs it" \
+            "installed to sync images to another registry"
+          exit 1
+        fi
+
+        # A manifest's digest is the digest of its raw bytes, so this is exact
+        # for a single image and for a multi-arch index alike. Plain `skopeo
+        # inspect` has to resolve an index down to one platform before it can
+        # parse it; --raw never does, so it can't disagree with the registry.
+        manifest_digest() {
+          skopeo inspect --raw "docker://$1" 2>/dev/null \
+            | sha256sum | cut -d' ' -f1
+        }
+
+        while IFS= read -r destination; do
+          [ -n "$destination" ] || continue
+
+          # Skip a digest that is already there instead of re-pushing it.
+          # Registries with tag immutability (ECR, and GHCR/Docker Hub with
+          # immutability enabled) reject a re-push of the same tag, and a
+          # re-dispatch of an already-mirrored digest is a legitimate no-op.
+          # A destination that doesn't exist yet exits non-zero here, which
+          # simply means "not there, copy it".
+          if current="$(manifest_digest "$destination")" &&
+            [ "sha256:$current" = "$EXPECTED_DIGEST" ]; then
+            echo "$destination is already $EXPECTED_DIGEST; skipping"
+            continue
+          fi
+
+          echo "Copying $SOURCE_REF to $destination"
+          # --all is load-bearing, not belt-and-braces: without it skopeo
+          # copies only the runner's own architecture, and --preserve-digests
+          # does *not* object — it preserves that single image's digest
+          # instead of the index's, landing a digest the manifests were never
+          # bumped to. With --all, --preserve-digests fails loudly rather
+          # than silently rewriting anything.
+          # --retry-times because the default is 0: a single transient 5xx or
+          # reset connection part-way through a multi-arch push would
+          # otherwise fail the bump, and this step failing is deliberately
+          # fatal. Retrying is the cheapest way to keep that strictness from
+          # manufacturing outages out of blips.
+          skopeo copy --all --preserve-digests --retry-times 3 \
+            "docker://$SOURCE_REF" "docker://$destination"
+
+          copied="$(manifest_digest "$destination")"
+          if [ "sha256:$copied" != "$EXPECTED_DIGEST" ]; then
+            echo "::error::$destination is sha256:$copied after the copy," \
+              "but the manifests were bumped to $EXPECTED_DIGEST"
+            exit 1
+          fi
+        done <<< "$DESTINATIONS"
+
+        echo "synced=true" >> "$GITHUB_OUTPUT"
 
     - name: Stage bump
       if:

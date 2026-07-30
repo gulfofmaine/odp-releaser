@@ -17,7 +17,7 @@ time -- in CI on the config repo, or as a ``bump-images --dry-run`` pre-flight
 
 The engines (``update_kustomize_with_payload``, ``update_helm_values_with_payload``,
 ``update_file_with_payload``) are pure ``(path, text, manifest, payload,
-commit_message) -> str`` functions with no filesystem I/O of their own
+deployed_name, commit_message) -> str`` functions with no filesystem I/O of their own
 (``bump_images._apply_manifest`` does all the reading and writing) -- so
 they're the actual source of truth for "would this manifest apply cleanly",
 not a prediction of it. Every hand-rolled check below exists *only* for
@@ -41,17 +41,13 @@ touching a line number it wasn't handed.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-from string import Formatter
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
-from yamlpath import Processor, YAMLPath
 from yamlpath.exceptions import YAMLPathException
 
-from odp_releaser.comment_body import COMMENT_TEMPLATE_KEYS, synthesize_context
 from odp_releaser.manifests.file import update_file_with_payload
 from odp_releaser.manifests.helm import (
     dagster_deployment_path,
@@ -69,76 +65,43 @@ from odp_releaser.manifests.kustomize import (
 )
 from odp_releaser.schemas.manifest_config import (
     AllowedActors,
-    CommentConfig,
     ConfigDefaults,
     FileManifest,
     HelmManifest,
     ImageConfig,
     KustomizeManifest,
     ManifestConfig,
-    config_matches_event,
 )
 from odp_releaser.validation.cross_config import check_cross_config
+from odp_releaser.validation.deployed_as import (
+    check_deployed_as_and_sync,
+    check_deployed_as_collisions,
+    check_file_manifest_set_upstream_name,
+    check_kustomize_deployed_as_agreement,
+)
 from odp_releaser.validation.diagnostics import Diagnostics
 from odp_releaser.validation.engine_backstop import (
     representative_event,
     run_engine_backstop,
 )
+from odp_releaser.validation.image_name_shape import image_name_shape_problems
+from odp_releaser.validation.location import ConfigLocation
 from odp_releaser.validation.manifest_text import load_manifest_text
 from odp_releaser.validation.ruamel_lines import line_for_index, line_for_key
+from odp_releaser.validation.templates import (
+    validate_comment_templates,
+    validate_set,
+    validate_template_value,
+)
 from odp_releaser.validation.unknown_keys import report_unknown_keys
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from yamlpath import Processor
+
     from odp_releaser.schemas.client_payload import ClientPayload
-
-# The placeholders every ``set``/``environment_url`` template may reference,
-# drawn straight from :meth:`ClientPayload.value_format_kwargs`. Kept here
-# (rather than re-derived) and cross-checked by a test against a real
-# payload's ``value_format_kwargs()`` keys, so the two can't silently drift
-# if a placeholder is ever added or renamed on either side.
-TEMPLATE_KEYS: frozenset[str] = frozenset({"new_tag", "git_sha", "digest", "payload"})
-
-_INVALID_IMAGE_NAME_CHARS = ("@", ":")
-
-
-@dataclass(frozen=True)
-class ConfigLocation:
-    """Dotted config path plus the best-known source line for diagnostics.
-
-    ``validate_image_configs`` works from already-validated models, which
-    carry no source line info at all -- only a caller sitting on the raw
-    YAML (``validate_image_manifest``) can look one up. Rather than thread a
-    raw line number through every helper here, callers build one
-    ``ConfigLocation`` per image (or config item) with the best line they
-    could cheaply find, and every diagnostic about something nested under it
-    -- a ``set`` selector, a manifest path -- inherits that same "best-known"
-    line via :meth:`child`, since nothing more precise is available once
-    we're working with models alone.
-    """
-
-    location: str
-    line: int | None = None
-
-    def child(self, suffix: str, *, line: int | None = None) -> ConfigLocation:
-        """A location for something nested under this one.
-
-        A ``suffix`` starting with ``[`` (a list index) is appended
-        directly (``<loc>[0]``); anything else is dot-joined
-        (``<loc>.kustomize_manifests``), mirroring the convention
-        ``unknown_keys`` already uses for dotted config paths. ``line``
-        defaults to this location's own line, since a caller building a
-        child location usually has no better line than its parent's.
-        """
-        if suffix.startswith("["):
-            new_location = f"{self.location}{suffix}"
-        elif self.location:
-            new_location = f"{self.location}.{suffix}"
-        else:
-            new_location = suffix
-        return ConfigLocation(new_location, line if line is not None else self.line)
 
 
 def validate_image_manifest(
@@ -205,15 +168,22 @@ def validate_image_manifest(
     _check_team_reviewers_shape(
         config.defaults.team_reviewers, defaults_location, diagnostics
     )
-    _validate_comment_templates(config.defaults.comment, defaults_location, diagnostics)
+    validate_comment_templates(config.defaults.comment, defaults_location, diagnostics)
     if config.defaults.environment_url is not None:
-        _validate_template_value(
+        validate_template_value(
             config.defaults.environment_url,
             defaults_location.child("environment_url"),
             diagnostics,
             payload,
             warn_if_no_placeholder=False,
         )
+
+    # Only images in scope for this run (all of them when there's no payload,
+    # else just payload.image_name, matching validate_image_configs's own
+    # filtering below) feed check_deployed_as_collisions -- a payload-filtered
+    # run leaves at most one image key here, so a cross-image collision
+    # correctly can't fire for it.
+    in_scope_configs: dict[str, Sequence[ImageConfig]] = {}
 
     for image_name, image_configs in config.images.items():
         image_line = line_for_key(images_data, image_name)
@@ -228,11 +198,13 @@ def validate_image_manifest(
         matching = [
             (index, image_config)
             for index, image_config in enumerate(image_configs)
-            if payload is None
-            or config_matches_event(image_config, payload.source.event)
+            if payload is None or image_config.matches_event(payload.source.event)
         ]
         if not matching:
             continue
+
+        matching_configs = [image_config for _, image_config in matching]
+        in_scope_configs[image_name] = matching_configs
 
         first_index = matching[0][0]
         item_line = line_for_index(configs_data, first_index)
@@ -244,13 +216,15 @@ def validate_image_manifest(
         validate_image_configs(
             config_path,
             image_name,
-            [image_config for _, image_config in matching],
+            matching_configs,
             config.defaults,
             payload=payload,
             check_files=check_files,
             diagnostics=diagnostics,
             location=location,
         )
+
+    check_deployed_as_collisions(in_scope_configs, config.defaults, diagnostics)
 
     return diagnostics
 
@@ -292,6 +266,7 @@ def validate_image_configs(
             config_path,
             image_name,
             image_config,
+            defaults,
             item_location,
             diagnostics,
             cache,
@@ -364,20 +339,15 @@ def _check_image_name(
 ) -> None:
     """The ``images:`` key must be a name a real payload could equal.
 
-    Mirrors :meth:`ClientPayload._validate_image_name` (no ``@``/``:``) plus
-    the shape every real image reference otherwise has (lowercase, no
-    surrounding whitespace, non-empty) -- a config keyed on anything else can
-    never equal ``payload.image_name`` and so can never match a bump.
+    The shape rules themselves live in :func:`image_name_shape_problems`,
+    shared with the identical check on ``ImageConfig.deployed_as`` (see
+    :mod:`odp_releaser.validation.deployed_as`) so the two can't drift --
+    a config keyed on (or declaring a mirror as) anything other than a
+    real image name can never equal ``payload.image_name`` (or a real
+    ``image.repository``/``newName``) and so can never match or agree with
+    anything.
     """
-    problems: list[str] = []
-    if not image_name:
-        problems.append("must not be empty")
-    if image_name != image_name.strip():
-        problems.append("must not have leading/trailing whitespace")
-    if image_name != image_name.lower():
-        problems.append("must not contain uppercase characters")
-    if any(char in image_name for char in _INVALID_IMAGE_NAME_CHARS):
-        problems.append("must not contain '@' or ':'")
+    problems = image_name_shape_problems(image_name)
     if not problems:
         return
     message = (
@@ -469,6 +439,7 @@ def _validate_config_item(
     config_path: Path,
     image_name: str,
     image_config: ImageConfig,
+    defaults: ConfigDefaults,
     location: ConfigLocation,
     diagnostics: Diagnostics,
     cache: dict[Path, str | None],
@@ -488,6 +459,10 @@ def _validate_config_item(
             line=location.line,
         )
 
+    check_deployed_as_and_sync(
+        image_name, image_config, defaults, location, diagnostics
+    )
+
     _check_repo_and_actor_shape(
         image_config.allowed_source_repos,
         image_config.allowed_actors,
@@ -495,10 +470,10 @@ def _validate_config_item(
         diagnostics,
     )
     _check_team_reviewers_shape(image_config.team_reviewers, location, diagnostics)
-    _validate_comment_templates(image_config.comment, location, diagnostics)
+    validate_comment_templates(image_config.comment, location, diagnostics)
 
     if image_config.environment_url is not None:
-        _validate_template_value(
+        validate_template_value(
             image_config.environment_url,
             location.child("environment_url"),
             diagnostics,
@@ -507,6 +482,11 @@ def _validate_config_item(
         )
 
     event = representative_event(image_config)
+    # A real bump keys deployed_name off the payload's image name; here,
+    # without a payload, the config's own `images:` key stands in for it.
+    deployed_name = image_config.deployed_name(
+        payload.image_name if payload is not None else image_name
+    )
 
     for index, kustomize_manifest in enumerate(image_config.kustomize_manifests):
         _validate_kustomize(
@@ -517,6 +497,8 @@ def _validate_config_item(
             diagnostics,
             cache,
             payload=payload,
+            deployed_name=deployed_name,
+            deployed_as=image_config.deployed_as,
             event=event,
             check_files=check_files,
         )
@@ -530,6 +512,7 @@ def _validate_config_item(
             diagnostics,
             cache,
             payload=payload,
+            deployed_name=deployed_name,
             event=event,
             check_files=check_files,
         )
@@ -543,6 +526,8 @@ def _validate_config_item(
             diagnostics,
             cache,
             payload=payload,
+            deployed_name=deployed_name,
+            deployed_as=image_config.deployed_as,
             event=event,
             check_files=check_files,
         )
@@ -581,6 +566,8 @@ def _validate_kustomize(
     cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
+    deployed_name: str,
+    deployed_as: str | None,
     event: str,
     check_files: bool,
 ) -> None:
@@ -594,8 +581,20 @@ def _validate_kustomize(
         check_files=check_files,
     )
     processor = open_for_editing(text) if text is not None else None
-    _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
+    validate_set(
+        manifest.set,
+        location.child("set"),
+        diagnostics,
+        processor,
+        payload,
+        deployed_name,
+    )
 
+    # image_selector is deliberately still built from image_name (the
+    # upstream name), not deployed_name -- update_kustomize_with_payload
+    # matches the same `/images[name=...]` entry regardless of deployed_as,
+    # since kustomize's own `newName` carries the mirror. See
+    # update_kustomize_with_payload's docstring for why.
     if processor is not None:
         image_selector = image_entry_path(image_name)
         if manifest.pin == "tag":
@@ -638,6 +637,10 @@ def _validate_kustomize(
                 line=location.line,
             )
 
+        check_kustomize_deployed_as_agreement(
+            deployed_as, images_node, location, diagnostics
+        )
+
     if text is not None and len(diagnostics.errors) == error_count:
         resolved = resolve_manifest_path(config_path, manifest.path)
         run_engine_backstop(
@@ -648,6 +651,7 @@ def _validate_kustomize(
             image_name,
             event,
             payload,
+            deployed_name,
             location,
             diagnostics,
         )
@@ -662,6 +666,7 @@ def _validate_helm(
     cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
+    deployed_name: str,
     event: str,
     check_files: bool,
 ) -> None:
@@ -675,17 +680,30 @@ def _validate_helm(
         check_files=check_files,
     )
     processor = open_for_editing(text) if text is not None else None
-    _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
+    validate_set(
+        manifest.set,
+        location.child("set"),
+        diagnostics,
+        processor,
+        payload,
+        deployed_name,
+    )
 
     if manifest.dagster_user_code and processor is not None:
-        # bump-images matches (and writes) dagster_tag_path with
-        # mustexist=True; this only needs to know a deployment entry exists
-        # at all, which is dagster_deployment_path (the same prefix that tag
-        # path is built from).
-        selector = dagster_deployment_path(image_name)
+        # bump-images matches (and writes) dagster_tag_path against
+        # deployed_name, not image_name -- update_helm_values_with_payload
+        # matches image.repository, which *is* the deployed name, unlike
+        # kustomize's images[name=...] entry (see that engine's docstring
+        # for the asymmetry). This only needs to know a deployment entry
+        # exists at all, which is dagster_deployment_path (the same prefix
+        # that tag path is built from).
+        selector = dagster_deployment_path(deployed_name)
         if not _node_exists(processor, selector):
             diagnostics.error(
                 f"dagster_user_code is true but no {selector} entry exists; "
+                f"this matched on the deployed name {deployed_name!r} "
+                "(image_config.deployed_as if set, else the payload's "
+                "image_name -- see ImageConfig.deployed_name), and "
                 "bump-images sets its tag with mustexist=True, which raises",
                 location=location.child("dagster_user_code").location,
                 line=location.line,
@@ -701,6 +719,7 @@ def _validate_helm(
             image_name,
             event,
             payload,
+            deployed_name,
             location,
             diagnostics,
         )
@@ -715,6 +734,8 @@ def _validate_file_manifest(
     cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
+    deployed_name: str,
+    deployed_as: str | None,
     event: str,
     check_files: bool,
 ) -> None:
@@ -728,7 +749,19 @@ def _validate_file_manifest(
         check_files=check_files,
     )
     processor = open_for_editing(text) if text is not None else None
-    _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
+    validate_set(
+        manifest.set,
+        location.child("set"),
+        diagnostics,
+        processor,
+        payload,
+        deployed_name,
+    )
+
+    upstream_name = payload.image_name if payload is not None else image_name
+    check_file_manifest_set_upstream_name(
+        manifest.set, deployed_as, upstream_name, location.child("set"), diagnostics
+    )
 
     if text is not None and len(diagnostics.errors) == error_count:
         resolved = resolve_manifest_path(config_path, manifest.path)
@@ -740,185 +773,7 @@ def _validate_file_manifest(
             image_name,
             event,
             payload,
+            deployed_name,
             location,
             diagnostics,
         )
-
-
-def _validate_set(
-    set_paths: dict[str, str],
-    location: ConfigLocation,
-    diagnostics: Diagnostics,
-    processor: Processor | None,
-    payload: ClientPayload | None,
-) -> None:
-    for selector, value in set_paths.items():
-        selector_location = location.child(f'"{selector}"')
-        _validate_selector(selector, selector_location, diagnostics, processor)
-        _validate_template_value(value, selector_location, diagnostics, payload)
-
-
-def _validate_selector(
-    selector: str,
-    location: ConfigLocation,
-    diagnostics: Diagnostics,
-    processor: Processor | None,
-) -> None:
-    """A ``set`` selector must parse, and (if the file loaded) must resolve.
-
-    ``YAMLPath`` parses lazily -- constructing it never raises, only
-    accessing ``.escaped`` does -- so parseability has to be forced rather
-    than just constructed and discarded.
-    """
-    try:
-        path = YAMLPath(selector)
-        _ = path.escaped
-    except YAMLPathException as exc:
-        diagnostics.error(
-            f"{selector!r} is not a valid yamlpath: {exc}",
-            location=location.location,
-            line=location.line,
-        )
-        return
-
-    if processor is None:
-        return
-    try:
-        list(processor.get_nodes(selector, mustexist=True))
-    except YAMLPathException as exc:
-        diagnostics.error(
-            f"{selector!r} does not resolve in its target manifest: {exc}",
-            location=location.location,
-            line=location.line,
-        )
-
-
-def _validate_comment_templates(
-    comment: CommentConfig | None,
-    location: ConfigLocation,
-    diagnostics: Diagnostics,
-) -> None:
-    """Both comment templates only use known, ``.format``-safe placeholders.
-
-    Comment templates have their own vocabulary (see
-    :mod:`odp_releaser.comment_body`) and are checked against a synthetic
-    context rather than the payload, since most of what a comment can reference
-    -- the deploy repo, the bump URL, the resolved environment -- isn't known
-    until the bump runs. ``warn_if_no_placeholder`` is off because a wholly
-    static comment is a legitimate thing to want.
-    """
-    if comment is None:
-        return
-    context_kwargs = synthesize_context().format_kwargs()
-    for field in ("staged", "deployed"):
-        template: str | None = getattr(comment, field)
-        if not template:
-            continue
-        _validate_template_value(
-            template,
-            location.child(f"comment.{field}"),
-            diagnostics,
-            None,
-            warn_if_no_placeholder=False,
-            valid_keys=COMMENT_TEMPLATE_KEYS,
-            format_kwargs=context_kwargs,
-        )
-
-
-def _validate_template_value(
-    value: str,
-    location: ConfigLocation,
-    diagnostics: Diagnostics,
-    payload: ClientPayload | None,
-    *,
-    warn_if_no_placeholder: bool = True,
-    valid_keys: frozenset[str] = TEMPLATE_KEYS,
-    format_kwargs: dict[str, str] | None = None,
-) -> None:
-    """A templated value only uses known, ``.format``-safe placeholders.
-
-    ``apply_set_templates`` calls ``value.format(**payload.value_format_kwargs())``
-    at bump time, so every failure mode of that call is checked here ahead of
-    time: an unknown field name (``KeyError``), a positional field (the
-    runtime only ever passes keyword arguments, so ``{0}``/``{}`` also raise
-    ``KeyError``), attribute/index access (``{payload.foo}`` -- technically
-    ``str.format`` would attempt it, but nothing in ``value_format_kwargs()``
-    supports it usefully, so it's flagged rather than silently misbehaving),
-    and a stray ``{``/``}`` (``ValueError`` from ``Formatter().parse``
-    itself). When real format arguments are available and none of those static
-    checks already flagged the value, the actual ``value.format(**kwargs)``
-    call is attempted too, so the check is faithful to a real ``bump-images``
-    run rather than only to the placeholder names -- but a value already
-    reported above isn't reported a second time for failing the very call that
-    was predicted to fail.
-
-    ``valid_keys``/``format_kwargs`` default to the ``set``/
-    ``environment_url`` vocabulary (:data:`TEMPLATE_KEYS` and the payload's
-    own ``value_format_kwargs()``). Comment templates pass their own pair --
-    :data:`~odp_releaser.comment_body.COMMENT_TEMPLATE_KEYS` and a synthetic
-    context -- because a comment may reference deploy-side run facts that have
-    no business being templated into a manifest.
-    """
-    reported = False
-    try:
-        parsed = list(Formatter().parse(value))
-    except ValueError as exc:
-        diagnostics.error(
-            f"{value!r} is not a valid format string: {exc}",
-            location=location.location,
-            line=location.line,
-        )
-        return
-
-    field_names = [
-        field_name for _, field_name, _, _ in parsed if field_name is not None
-    ]
-
-    for field_name in field_names:
-        if field_name == "" or field_name.isdigit():
-            diagnostics.error(
-                f"{value!r} uses a positional placeholder "
-                f"'{{{field_name}}}'; bump-images calls "
-                "str.format(**kwargs), so only named placeholders work",
-                location=location.location,
-                line=location.line,
-            )
-        elif "." in field_name or "[" in field_name:
-            diagnostics.error(
-                f"{value!r} uses attribute/index access "
-                f"'{{{field_name}}}', which is not supported; only bare "
-                "placeholder names are",
-                location=location.location,
-                line=location.line,
-            )
-        elif field_name not in valid_keys:
-            known = ", ".join(sorted(valid_keys))
-            diagnostics.error(
-                f"{value!r} references unknown placeholder "
-                f"'{{{field_name}}}'; valid placeholders are: {known}",
-                location=location.location,
-                line=location.line,
-            )
-        else:
-            continue
-        reported = True
-
-    if warn_if_no_placeholder and not field_names:
-        diagnostics.warning(
-            f"{value!r} has no template placeholder, so bump-images can "
-            "never change it",
-            location=location.location,
-            line=location.line,
-        )
-
-    if format_kwargs is None and payload is not None:
-        format_kwargs = payload.value_format_kwargs()
-    if format_kwargs is not None and not reported:
-        try:
-            value.format(**format_kwargs)
-        except (KeyError, ValueError, IndexError) as exc:
-            diagnostics.error(
-                f"{value!r} failed to format with the real payload: {exc}",
-                location=location.location,
-                line=location.line,
-            )

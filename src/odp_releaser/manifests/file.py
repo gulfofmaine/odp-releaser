@@ -27,9 +27,18 @@ def update_file_with_payload(
     file_text: str,
     manifest: FileManifest,
     payload: ClientPayload,
+    deployed_name: str,
     commit_message: list[str],
 ) -> str:
     """Update a generic YAML or JSON manifest via ``manifest.set`` paths.
+
+    There is no implicit image field on this engine (see
+    :class:`~odp_releaser.schemas.manifest_config.FileManifest`), so
+    ``deployed_name`` (``ImageConfig.deployed_as`` when set, otherwise
+    ``payload.image_name`` -- see :meth:`ImageConfig.deployed_name`)
+    only ever reaches this manifest via ``{deployed_image}`` in a ``set``
+    template, e.g. ``"{deployed_image}@{digest}"`` in place of a hand-typed
+    mirror registry path.
 
     JSON is parsed as a YAML subset by ruamel. Files with a ``.json`` suffix
     are re-serialized with :func:`json.dumps` (2-space indent, trailing
@@ -41,7 +50,7 @@ def update_file_with_payload(
 
     commit_message.append(f"- Updated file manifest at {file_path}")
 
-    apply_set_templates(processor, manifest.set, payload, commit_message)
+    apply_set_templates(processor, manifest.set, payload, deployed_name, commit_message)
 
     if file_path.suffix == ".json":
         return json.dumps(_to_plain(processor.data), indent=2) + "\n"

@@ -19,11 +19,11 @@ from odp_releaser.schemas.manifest_config import (
 )
 from odp_releaser.validation.diagnostics import Diagnostics, Severity
 from odp_releaser.validation.image_manifest import (
-    TEMPLATE_KEYS,
-    ConfigLocation,
     validate_image_configs,
     validate_image_manifest,
 )
+from odp_releaser.validation.location import ConfigLocation
+from odp_releaser.validation.templates import TEMPLATE_KEYS
 
 if TYPE_CHECKING:
     from odp_releaser.schemas.client_payload import ClientPayload
@@ -89,8 +89,14 @@ def test_config_location_child_of_an_empty_base_location_is_just_the_suffix() ->
 
 
 def test_template_keys_match_payload_value_format_kwargs() -> None:
+    """``deployed_image`` is the one ``TEMPLATE_KEYS`` entry not drawn from the payload.
+
+    It's added by ``apply_set_templates`` itself (see its docstring), so the
+    relationship is explicit rather than a loosened equality -- the two still
+    can't drift silently.
+    """
     payload = _payload()
-    assert set(payload.value_format_kwargs()) == TEMPLATE_KEYS
+    assert set(payload.value_format_kwargs()) | {"deployed_image"} == TEMPLATE_KEYS
 
 
 # --- File-level plumbing ------------------------------------------------------
@@ -1026,6 +1032,485 @@ images:
     assert diagnostics.diagnostics == ()
 
 
+# --- deployed_as: shape -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("deployed_as", "should_error"),
+    [
+        pytest.param("ghcr.io/gmri/mirror", False, id="valid"),
+        pytest.param("GHCR.io/GMRI/Mirror", True, id="uppercase"),
+        pytest.param("ghcr.io/gmri/mirror:tag", True, id="colon"),
+        pytest.param("ghcr.io/gmri/mirror@sha256:abc", True, id="at-sign"),
+        pytest.param(" ghcr.io/gmri/mirror", True, id="leading-whitespace"),
+        pytest.param("", True, id="empty"),
+    ],
+)
+def test_deployed_as_shape(
+    tmp_path: Path, deployed_as: str, *, should_error: bool
+) -> None:
+    path = _write(
+        tmp_path,
+        f"""
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: "{deployed_as}"
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is should_error
+
+
+# --- deployed_as: sync with nothing to sync to ---------------------------------
+
+
+def test_sync_true_without_deployed_as_errors(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is True
+    assert any("nothing to copy" in m for m in _messages(diagnostics))
+
+
+def test_sync_true_with_deployed_as_is_clean_on_that_check(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any("nothing to copy" in m for m in _messages(diagnostics))
+
+
+def test_sync_inherited_from_defaults_without_deployed_as_errors(
+    tmp_path: Path,
+) -> None:
+    """``sync`` inherits from ``defaults`` via ``resolve_setting`` -- a repo-wide
+    ``defaults: sync: true`` must be judged the same as an explicit per-config
+    ``sync: true``, so this has to resolve before judging it."""
+    path = _write(
+        tmp_path,
+        """
+defaults:
+  sync: true
+images:
+  gmri/app:
+    - events: [push]
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is True
+    assert any("nothing to copy" in m for m in _messages(diagnostics))
+
+
+# --- deployed_as: redundant with the image's own key ----------------------------
+
+
+def test_deployed_as_equal_to_image_name_warns(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: gmri/app
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is False
+    assert any("declares nothing new" in m for m in _messages(diagnostics))
+
+
+def test_deployed_as_different_from_image_name_does_not_warn_as_redundant(
+    tmp_path: Path,
+) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any("declares nothing new" in m for m in _messages(diagnostics))
+
+
+# --- deployed_as: kustomize newName agreement -----------------------------------
+
+
+def test_kustomize_new_name_matches_deployed_as_is_clean(tmp_path: Path) -> None:
+    (tmp_path / "kustomization.yaml").write_text(
+        'images:\n  - name: gmri/app\n    newName: ghcr.io/gmri/mirror\n    newTag: "1"\n'
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      kustomize_manifests:
+        - ./kustomization.yaml
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    assert diagnostics.diagnostics == ()
+
+
+def test_kustomize_new_name_disagrees_with_deployed_as_errors(tmp_path: Path) -> None:
+    (tmp_path / "kustomization.yaml").write_text(
+        'images:\n  - name: gmri/app\n    newName: ghcr.io/gmri/other-mirror\n    newTag: "1"\n'
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      kustomize_manifests:
+        - ./kustomization.yaml
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    assert diagnostics.failed() is True
+    assert any("disagree about which registry" in m for m in _messages(diagnostics))
+
+
+def test_kustomize_new_name_missing_when_deployed_as_set_errors(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "kustomization.yaml").write_text(
+        'images:\n  - name: gmri/app\n    newTag: "1"\n'
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      kustomize_manifests:
+        - ./kustomization.yaml
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    assert diagnostics.failed() is True
+    assert any("config declares" in m for m in _messages(diagnostics))
+
+
+def test_kustomize_new_name_present_without_deployed_as_warns(tmp_path: Path) -> None:
+    """The converse check: this is exactly the drift preserved on purpose in
+    ``tests/manifests/dagster_helm_kustomize/`` (a real ``newName``, no
+    ``deployed_as``)."""
+    (tmp_path / "kustomization.yaml").write_text(
+        'images:\n  - name: gmri/app\n    newName: ghcr.io/gmri/mirror\n    newTag: "1"\n'
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      kustomize_manifests:
+        - ./kustomization.yaml
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    assert diagnostics.failed() is False
+    assert any("can't see this mirror" in m for m in _messages(diagnostics))
+
+
+def test_kustomize_new_name_commented_out_without_deployed_as_does_not_warn() -> None:
+    """A commented-out ``newName`` is not data at all -- ruamel never sees it as
+    a key -- so the converse check above must not fire on it. This is the
+    literal fixture the converse check is meant to eventually catch, once
+    someone uncomments the line without also declaring ``deployed_as``."""
+    diagnostics = validate_image_manifest(
+        FIXTURES / "dagster_helm_kustomize" / "image_manifest.yaml"
+    )
+    assert diagnostics.diagnostics == ()
+
+
+# --- deployed_as: helm dagster "no matching deployment" names the deployed name --
+
+
+def test_dagster_user_code_missing_deployment_with_deployed_as_names_the_mirror(
+    tmp_path: Path,
+) -> None:
+    """When ``deployed_as`` is set, the "no matching deployment" error must
+    name the *deployed* name it matched on (the mirror), not the config's own
+    ``images:`` key -- otherwise a reader can't tell the two apart."""
+    (tmp_path / "values.yaml").write_text(
+        'deployments:\n  - name: other\n    image:\n      repository: gmri/app\n      tag: "1"\n'
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      helm_charts:
+        - path: ./values.yaml
+          dagster_user_code: true
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    expected_selector = dagster_deployment_path("ghcr.io/gmri/mirror")
+    assert any(expected_selector in m for m in _messages(diagnostics))
+    assert any("deployed name" in m for m in _messages(diagnostics))
+
+
+# --- deployed_as: file_manifests set values hard-coding the upstream name ------
+
+
+def test_file_manifest_set_value_with_hardcoded_upstream_name_warns(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "deployment.json").write_text('{"image": "old"}\n')
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      file_manifests:
+        - path: ./deployment.json
+          set:
+            '/image': "gmri/app:{new_tag}"
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is False
+    assert any(
+        "hard-codes the upstream image name" in m for m in _messages(diagnostics)
+    )
+
+
+def test_file_manifest_set_value_using_deployed_image_placeholder_is_clean(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "deployment.json").write_text('{"image": "old"}\n')
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      file_manifests:
+        - path: ./deployment.json
+          set:
+            '/image': "{deployed_image}:{new_tag}"
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any(
+        "hard-codes the upstream image name" in m for m in _messages(diagnostics)
+    )
+
+
+def test_file_manifest_set_value_without_deployed_as_does_not_warn(
+    tmp_path: Path,
+) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      file_manifests:
+        - path: ./deployment.json
+          set:
+            '/image': "gmri/app:{new_tag}"
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any(
+        "hard-codes the upstream image name" in m for m in _messages(diagnostics)
+    )
+
+
+# --- deployed_as: cross-image collisions ---------------------------------------
+
+
+def test_two_images_same_deployed_as_both_syncing_errors(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app-one:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+      sync: true
+  gmri/app-two:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is True
+    messages = _messages(diagnostics)
+    assert any(
+        "gmri/app-one" in m and "gmri/app-two" in m and "sync: true" in m
+        for m in messages
+    )
+
+
+def test_two_images_same_deployed_as_neither_syncing_warns(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app-one:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+  gmri/app-two:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is False
+    messages = _messages(diagnostics)
+    assert any(
+        "gmri/app-one" in m and "gmri/app-two" in m and "declared by more than one" in m
+        for m in messages
+    )
+
+
+def test_two_images_same_deployed_as_sync_inherited_from_defaults_errors(
+    tmp_path: Path,
+) -> None:
+    """``sync`` inherits from ``defaults.sync`` here too, exactly like the
+    single-config check: a repo-wide ``defaults: sync: true`` is exactly as
+    dangerous as an explicit per-config one."""
+    path = _write(
+        tmp_path,
+        """
+defaults:
+  sync: true
+images:
+  gmri/app-one:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+  gmri/app-two:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert diagnostics.failed() is True
+    assert any("sync: true" in m for m in _messages(diagnostics))
+
+
+def test_two_images_different_deployed_as_is_clean(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app-one:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror-one
+      sync: true
+  gmri/app-two:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror-two
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any(
+        "declared by more than one" in m
+        or "declared with sync: true by more than one" in m
+        for m in _messages(diagnostics)
+    )
+
+
+def test_one_image_same_deployed_as_across_its_own_configs_is_not_a_collision(
+    tmp_path: Path,
+) -> None:
+    """A single image declaring the same ``deployed_as`` across two of its own
+    configs is legitimate (a ``sync`` fans out per config); this check only
+    fires across *different* images keys."""
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      sync: true
+    - events: [release]
+      deployed_as: ghcr.io/gmri/mirror
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any(
+        "declared by more than one" in m
+        or "declared with sync: true by more than one" in m
+        for m in _messages(diagnostics)
+    )
+
+
+def test_payload_filtered_run_does_not_crash_or_half_fire_collision_check(
+    tmp_path: Path,
+) -> None:
+    """A payload-filtered run only ever has one image key in scope, so a
+    cross-image collision can never be observed -- this just has to not
+    crash and not report one anyway."""
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+      sync: true
+  gmri/other-app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/shared-mirror
+      sync: true
+""",
+    )
+    diagnostics = validate_image_manifest(path, payload=_payload(), check_files=False)
+    assert not any(
+        "declared by more than one" in m
+        or "declared with sync: true by more than one" in m
+        for m in _messages(diagnostics)
+    )
+
+
+# --- Dogfood: mirrored_dagster fixture ------------------------------------------
+
+
+def test_mirrored_dagster_fixture_is_clean() -> None:
+    diagnostics = validate_image_manifest(
+        FIXTURES / "mirrored_dagster" / "image_manifest.yaml"
+    )
+    assert diagnostics.diagnostics == ()
+    assert diagnostics.failed(strict=True) is False
+
+
 # --- W9: duplicate manifest targets ---------------------------------------------
 
 
@@ -1151,6 +1636,97 @@ images:
     )
     diagnostics = validate_image_manifest(path, check_files=False)
     assert any("disagree on environment" in m for m in _messages(diagnostics))
+
+
+# --- W11: disagreeing deployed_as across configs targeting the same manifest ----
+
+
+def test_disagreeing_deployed_as_across_configs_targeting_same_manifest_warns(
+    tmp_path: Path,
+) -> None:
+    """Unlike the ``_AGREEMENT_ATTRS`` settings, differing ``deployed_as`` is
+    only suspicious when two configs write the *same* manifest file -- a file
+    manifest, here, so the kustomize ``newName`` agreement check (a separate
+    concern) doesn't also fire and confuse what this test is isolating."""
+    (tmp_path / "deployment.json").write_text('{"image": "old"}\n')
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/one
+      file_manifests:
+        - path: ./deployment.json
+          set:
+            '/image': "{deployed_image}:{new_tag}"
+    - events: [push]
+      deployed_as: ghcr.io/gmri/two
+      file_manifests:
+        - path: ./deployment.json
+          set:
+            '/other': "{deployed_image}:{new_tag}"
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert any("different deployed_as values" in m for m in _messages(diagnostics))
+
+
+def test_agreeing_deployed_as_across_configs_targeting_the_same_manifest_is_clean(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "deployment.json").write_text('{"image": "old"}\n')
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/one
+      file_manifests:
+        - path: ./deployment.json
+          set:
+            '/image': "{deployed_image}:{new_tag}"
+    - events: [push]
+      deployed_as: ghcr.io/gmri/one
+      file_manifests:
+        - path: ./deployment.json
+          set:
+            '/other': "{deployed_image}:{new_tag}"
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any("different deployed_as values" in m for m in _messages(diagnostics))
+
+
+def test_different_deployed_as_across_configs_targeting_different_manifests_is_clean(
+    tmp_path: Path,
+) -> None:
+    """Different configs resolving different ``deployed_as`` is legitimate in
+    general -- only writing the *same* manifest file makes it suspicious."""
+    (tmp_path / "a.json").write_text('{"image": "old"}\n')
+    (tmp_path / "b.json").write_text('{"image": "old"}\n')
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/one
+      file_manifests:
+        - path: ./a.json
+          set:
+            '/image': "{deployed_image}:{new_tag}"
+    - events: [push]
+      deployed_as: ghcr.io/gmri/two
+      file_manifests:
+        - path: ./b.json
+          set:
+            '/image': "{deployed_image}:{new_tag}"
+""",
+    )
+    diagnostics = validate_image_manifest(path, check_files=False)
+    assert not any("different deployed_as values" in m for m in _messages(diagnostics))
 
 
 # --- validate_image_configs called directly, from models alone -----------------

@@ -5,7 +5,7 @@ what the manifest engines (:mod:`odp_releaser.manifests.kustomize`,
 :mod:`odp_releaser.manifests.helm`, :mod:`odp_releaser.manifests.file`) will
 do at bump time -- but those predictions can drift from the engines they
 model. The engines are pure functions of ``(path, text, manifest, payload,
-commit_message) -> str`` with no filesystem access of their own
+deployed_name, commit_message) -> str`` with no filesystem access of their own
 (``bump_images._apply_manifest`` does all the reading and writing), which
 makes them safe to call directly as an authoritative backstop: once a
 manifest's hand-rolled checks report no error, :func:`run_engine_backstop`
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from odp_releaser.schemas.manifest_config import ImageConfig
     from odp_releaser.validation.diagnostics import Diagnostics
-    from odp_releaser.validation.image_manifest import ConfigLocation
+    from odp_releaser.validation.location import ConfigLocation
 
 # Obviously-synthetic placeholder values for :func:`synthesize_payload`. Not
 # real hashes or hosts -- ``.invalid`` is the reserved (RFC 2606) TLD for
@@ -106,10 +106,11 @@ def run_engine_backstop[ManifestT](
     display_path: Path,
     text: str,
     manifest: ManifestT,
-    update_fn: Callable[[Path, str, ManifestT, ClientPayload, list[str]], str],
+    update_fn: Callable[[Path, str, ManifestT, ClientPayload, str, list[str]], str],
     image_name: str,
     event: str,
     payload: ClientPayload | None,
+    deployed_name: str,
     location: ConfigLocation,
     diagnostics: Diagnostics,
 ) -> None:
@@ -129,13 +130,16 @@ def run_engine_backstop[ManifestT](
 
     A real ``payload`` is used when available (matching what ``bump_images``
     would actually apply); otherwise one is synthesized per
-    :func:`synthesize_payload`.
+    :func:`synthesize_payload`. ``deployed_name`` must be the caller's own
+    :meth:`ImageConfig.deployed_name` result -- this
+    function has no ``ImageConfig`` to derive it from itself -- so the
+    backstop calls each engine with exactly the name ``bump_images`` would.
     """
     try:
         effective_payload = (
             payload if payload is not None else synthesize_payload(image_name, event)
         )
-        update_fn(display_path, text, manifest, effective_payload, [])
+        update_fn(display_path, text, manifest, effective_payload, deployed_name, [])
     except (
         YAMLPathException,
         KeyError,
