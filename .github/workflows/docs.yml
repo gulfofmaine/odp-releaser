@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+  pull_request:
   release:
     types:
       - published
@@ -20,18 +21,19 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
-    name: Deploy docs
+  # Runs on every trigger, so a pull request proves the site still builds
+  # before it is merged. The Pages steps are the only ones that need Pages
+  # permissions, so they are skipped for pull requests -- a fork pull request
+  # gets a read-only token and could not run them anyway.
+  build:
+    name: Build docs
     permissions:
       contents: read
-      pages: write # deploy the built site to GitHub Pages
-      id-token: write # required by actions/deploy-pages for OIDC
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      pages: read # actions/configure-pages reads the Pages site config
     runs-on: ubuntu-latest
     steps:
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        if: github.event_name != 'pull_request'
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -51,8 +53,21 @@ jobs:
       - run: uv run zensical build --clean
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: github.event_name != 'pull_request'
         with:
           path: site
 
+  deploy:
+    name: Deploy docs
+    needs: [build]
+    if: github.event_name != 'pull_request'
+    permissions:
+      pages: write # deploy the built site to GitHub Pages
+      id-token: write # required by actions/deploy-pages for OIDC
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
         id: deployment
