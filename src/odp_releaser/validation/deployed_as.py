@@ -39,7 +39,7 @@ from odp_releaser.validation.image_name_shape import image_name_shape_problems
 if TYPE_CHECKING:
     from odp_releaser.schemas.manifest_config import ConfigDefaults, ImageConfig
     from odp_releaser.validation.diagnostics import Diagnostics
-    from odp_releaser.validation.image_manifest import ConfigLocation
+    from odp_releaser.validation.location import ConfigLocation
 
 
 def check_deployed_as_and_sync(

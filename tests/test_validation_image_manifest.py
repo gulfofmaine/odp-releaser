@@ -19,11 +19,11 @@ from odp_releaser.schemas.manifest_config import (
 )
 from odp_releaser.validation.diagnostics import Diagnostics, Severity
 from odp_releaser.validation.image_manifest import (
-    TEMPLATE_KEYS,
-    ConfigLocation,
     validate_image_configs,
     validate_image_manifest,
 )
+from odp_releaser.validation.location import ConfigLocation
+from odp_releaser.validation.templates import TEMPLATE_KEYS
 
 if TYPE_CHECKING:
     from odp_releaser.schemas.client_payload import ClientPayload

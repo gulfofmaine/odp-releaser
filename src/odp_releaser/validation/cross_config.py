@@ -6,8 +6,7 @@ disagreeing setting isn't a property of any one config in isolation -- it's a
 collision or disagreement *between* sibling configs that ``bump_images``
 groups together by matching event before resolving settings or applying
 manifests. The checks here group the same way, so they can see what
-``bump_images`` itself sees. Split out of ``image_manifest`` purely to keep
-that module under the project's line-count budget; the two are one feature.
+``bump_images`` itself sees.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ if TYPE_CHECKING:
         KustomizeManifest,
     )
     from odp_releaser.validation.diagnostics import Diagnostics
-    from odp_releaser.validation.image_manifest import ConfigLocation
+    from odp_releaser.validation.location import ConfigLocation
 
 # The settings ``bump_images`` resolves per matching config (falling back to
 # `defaults` via `resolve_setting`) and warns about when matching configs for

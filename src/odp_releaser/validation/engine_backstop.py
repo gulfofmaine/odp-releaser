@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from odp_releaser.schemas.manifest_config import ImageConfig
     from odp_releaser.validation.diagnostics import Diagnostics
-    from odp_releaser.validation.image_manifest import ConfigLocation
+    from odp_releaser.validation.location import ConfigLocation
 
 # Obviously-synthetic placeholder values for :func:`synthesize_payload`. Not
 # real hashes or hosts -- ``.invalid`` is the reserved (RFC 2606) TLD for
