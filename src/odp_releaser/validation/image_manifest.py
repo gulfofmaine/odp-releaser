@@ -17,7 +17,7 @@ time -- in CI on the config repo, or as a ``bump-images --dry-run`` pre-flight
 
 The engines (``update_kustomize_with_payload``, ``update_helm_values_with_payload``,
 ``update_file_with_payload``) are pure ``(path, text, manifest, payload,
-commit_message) -> str`` functions with no filesystem I/O of their own
+deployed_name, commit_message) -> str`` functions with no filesystem I/O of their own
 (``bump_images._apply_manifest`` does all the reading and writing) -- so
 they're the actual source of truth for "would this manifest apply cleanly",
 not a prediction of it. Every hand-rolled check below exists *only* for
@@ -77,6 +77,7 @@ from odp_releaser.schemas.manifest_config import (
     KustomizeManifest,
     ManifestConfig,
     config_matches_event,
+    effective_deployed_name,
 )
 from odp_releaser.validation.cross_config import check_cross_config
 from odp_releaser.validation.diagnostics import Diagnostics
@@ -94,12 +95,19 @@ if TYPE_CHECKING:
 
     from odp_releaser.schemas.client_payload import ClientPayload
 
-# The placeholders every ``set``/``environment_url`` template may reference,
-# drawn straight from :meth:`ClientPayload.value_format_kwargs`. Kept here
+# The placeholders every ``set``/``environment_url`` template may reference.
+# Four of these are drawn straight from :meth:`ClientPayload.value_format_kwargs`;
+# ``deployed_image`` is not one of them -- ``apply_set_templates`` adds it
+# itself (see its docstring), formatted from ``effective_deployed_name``
+# rather than read off the payload -- so it's listed here alongside the
+# payload-derived keys but excluded from the cross-check below. Kept here
 # (rather than re-derived) and cross-checked by a test against a real
-# payload's ``value_format_kwargs()`` keys, so the two can't silently drift
-# if a placeholder is ever added or renamed on either side.
-TEMPLATE_KEYS: frozenset[str] = frozenset({"new_tag", "git_sha", "digest", "payload"})
+# payload's ``value_format_kwargs()`` keys plus ``deployed_image``, so the
+# two can't silently drift if a placeholder is ever added or renamed on
+# either side.
+TEMPLATE_KEYS: frozenset[str] = frozenset(
+    {"new_tag", "git_sha", "digest", "payload", "deployed_image"}
+)
 
 _INVALID_IMAGE_NAME_CHARS = ("@", ":")
 
@@ -507,6 +515,17 @@ def _validate_config_item(
         )
 
     event = representative_event(image_config)
+    # The same rule bump_images applies at bump time (see
+    # effective_deployed_name's docstring), just evaluated against `image_name`
+    # instead of `payload.image_name` when no real payload is available --
+    # the two are guaranteed equal whenever `payload` is not None, since a
+    # caller only ever reaches this config with a payload that already
+    # matched `image_name` (see validate_image_manifest's own filtering).
+    deployed_name = (
+        effective_deployed_name(image_config, payload)
+        if payload is not None
+        else (image_config.deployed_as or image_name)
+    )
 
     for index, kustomize_manifest in enumerate(image_config.kustomize_manifests):
         _validate_kustomize(
@@ -517,6 +536,7 @@ def _validate_config_item(
             diagnostics,
             cache,
             payload=payload,
+            deployed_name=deployed_name,
             event=event,
             check_files=check_files,
         )
@@ -530,6 +550,7 @@ def _validate_config_item(
             diagnostics,
             cache,
             payload=payload,
+            deployed_name=deployed_name,
             event=event,
             check_files=check_files,
         )
@@ -543,6 +564,7 @@ def _validate_config_item(
             diagnostics,
             cache,
             payload=payload,
+            deployed_name=deployed_name,
             event=event,
             check_files=check_files,
         )
@@ -581,6 +603,7 @@ def _validate_kustomize(
     cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
+    deployed_name: str,
     event: str,
     check_files: bool,
 ) -> None:
@@ -594,8 +617,20 @@ def _validate_kustomize(
         check_files=check_files,
     )
     processor = open_for_editing(text) if text is not None else None
-    _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
+    _validate_set(
+        manifest.set,
+        location.child("set"),
+        diagnostics,
+        processor,
+        payload,
+        deployed_name,
+    )
 
+    # image_selector is deliberately still built from image_name (the
+    # upstream name), not deployed_name -- update_kustomize_with_payload
+    # matches the same `/images[name=...]` entry regardless of deployed_as,
+    # since kustomize's own `newName` carries the mirror. See
+    # update_kustomize_with_payload's docstring for why.
     if processor is not None:
         image_selector = image_entry_path(image_name)
         if manifest.pin == "tag":
@@ -648,6 +683,7 @@ def _validate_kustomize(
             image_name,
             event,
             payload,
+            deployed_name,
             location,
             diagnostics,
         )
@@ -662,6 +698,7 @@ def _validate_helm(
     cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
+    deployed_name: str,
     event: str,
     check_files: bool,
 ) -> None:
@@ -675,14 +712,24 @@ def _validate_helm(
         check_files=check_files,
     )
     processor = open_for_editing(text) if text is not None else None
-    _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
+    _validate_set(
+        manifest.set,
+        location.child("set"),
+        diagnostics,
+        processor,
+        payload,
+        deployed_name,
+    )
 
     if manifest.dagster_user_code and processor is not None:
-        # bump-images matches (and writes) dagster_tag_path with
-        # mustexist=True; this only needs to know a deployment entry exists
-        # at all, which is dagster_deployment_path (the same prefix that tag
-        # path is built from).
-        selector = dagster_deployment_path(image_name)
+        # bump-images matches (and writes) dagster_tag_path against
+        # deployed_name, not image_name -- update_helm_values_with_payload
+        # matches image.repository, which *is* the deployed name, unlike
+        # kustomize's images[name=...] entry (see that engine's docstring
+        # for the asymmetry). This only needs to know a deployment entry
+        # exists at all, which is dagster_deployment_path (the same prefix
+        # that tag path is built from).
+        selector = dagster_deployment_path(deployed_name)
         if not _node_exists(processor, selector):
             diagnostics.error(
                 f"dagster_user_code is true but no {selector} entry exists; "
@@ -701,6 +748,7 @@ def _validate_helm(
             image_name,
             event,
             payload,
+            deployed_name,
             location,
             diagnostics,
         )
@@ -715,6 +763,7 @@ def _validate_file_manifest(
     cache: dict[Path, str | None],
     *,
     payload: ClientPayload | None,
+    deployed_name: str,
     event: str,
     check_files: bool,
 ) -> None:
@@ -728,7 +777,14 @@ def _validate_file_manifest(
         check_files=check_files,
     )
     processor = open_for_editing(text) if text is not None else None
-    _validate_set(manifest.set, location.child("set"), diagnostics, processor, payload)
+    _validate_set(
+        manifest.set,
+        location.child("set"),
+        diagnostics,
+        processor,
+        payload,
+        deployed_name,
+    )
 
     if text is not None and len(diagnostics.errors) == error_count:
         resolved = resolve_manifest_path(config_path, manifest.path)
@@ -740,6 +796,7 @@ def _validate_file_manifest(
             image_name,
             event,
             payload,
+            deployed_name,
             location,
             diagnostics,
         )
@@ -751,11 +808,32 @@ def _validate_set(
     diagnostics: Diagnostics,
     processor: Processor | None,
     payload: ClientPayload | None,
+    deployed_name: str,
 ) -> None:
+    """Check every ``set`` selector/value pair for one manifest.
+
+    ``deployed_name`` is folded into the real-``.format()`` check the same
+    way ``apply_set_templates`` folds it in at bump time -- as
+    ``{"deployed_image": deployed_name}`` alongside ``payload``'s own
+    keyword arguments -- so a ``set`` value that legitimately uses
+    ``{deployed_image}`` isn't reported as failing to format merely because
+    this check built a narrower kwargs dict than the real engine will.
+    """
+    format_kwargs = (
+        payload.value_format_kwargs() | {"deployed_image": deployed_name}
+        if payload is not None
+        else None
+    )
     for selector, value in set_paths.items():
         selector_location = location.child(f'"{selector}"')
         _validate_selector(selector, selector_location, diagnostics, processor)
-        _validate_template_value(value, selector_location, diagnostics, payload)
+        _validate_template_value(
+            value,
+            selector_location,
+            diagnostics,
+            payload,
+            format_kwargs=format_kwargs,
+        )
 
 
 def _validate_selector(

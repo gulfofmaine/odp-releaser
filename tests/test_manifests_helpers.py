@@ -76,8 +76,31 @@ def test_apply_set_templates_keyerror_names_the_bad_path_and_value() -> None:
 
     with pytest.raises(KeyError, match=r"/some/path.*\{sha\}"):
         apply_set_templates(
-            processor, {"/some/path": "{sha}"}, _payload(), commit_message
+            processor, {"/some/path": "{sha}"}, _payload(), "gmri/app", commit_message
         )
 
     # Nothing should have been recorded for a set that never applied.
     assert commit_message == []
+
+
+def test_apply_set_templates_deployed_image_kwarg_is_available() -> None:
+    """``{deployed_image}`` templates from the ``deployed_name`` argument.
+
+    Unlike ``{new_tag}``/``{git_sha}``/``{digest}``/``{payload}``, this
+    placeholder isn't drawn from the payload at all -- it's whatever the
+    caller passes as ``deployed_name`` (``ImageConfig.deployed_as`` when
+    set, otherwise the payload's own ``image_name``; see
+    ``bump_images.effective_deployed_name``).
+    """
+    processor = open_for_editing("some:\n  path: old\n")
+    commit_message: list[str] = []
+
+    apply_set_templates(
+        processor,
+        {"/some/path": "{deployed_image}"},
+        _payload(),
+        "registry.example.invalid/mirror/gmri-app",
+        commit_message,
+    )
+
+    assert processor.data["some"]["path"] == "registry.example.invalid/mirror/gmri-app"

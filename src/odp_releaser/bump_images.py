@@ -32,6 +32,7 @@ from odp_releaser.schemas.manifest_config import (
     ImageConfig,
     ManifestConfig,
     configs_for_event,
+    effective_deployed_name,
     resolve_comment_config,
     resolve_setting,
 )
@@ -46,9 +47,10 @@ class _HasPath(Protocol):
 
 def _apply_manifest[ManifestT: _HasPath](
     manifest: ManifestT,
-    update_fn: Callable[[Path, str, ManifestT, ClientPayload, list[str]], str],
+    update_fn: Callable[[Path, str, ManifestT, ClientPayload, str, list[str]], str],
     config_path: Path,
     payload: ClientPayload,
+    deployed_name: str,
     commit_message: list[str],
     *,
     dry_run: bool,
@@ -58,14 +60,21 @@ def _apply_manifest[ManifestT: _HasPath](
     Returns ``True`` when the update changed the manifest's contents. The
     update's commit message entries are only appended to ``commit_message``
     when the contents actually changed, so unchanged manifests don't show up
-    in the audit trail.
+    in the audit trail. ``deployed_name`` (see :func:`effective_deployed_name`)
+    is passed straight through to ``update_fn``, which each engine uses
+    differently -- see their own docstrings.
     """
     manifest_path = resolve_manifest_path(config_path, manifest.path)
     display_path = display_manifest_path(manifest_path)
     original_manifest, newline = read_manifest_text(manifest_path)
     manifest_messages: list[str] = []
     updated_manifest = update_fn(
-        display_path, original_manifest, manifest, payload, manifest_messages
+        display_path,
+        original_manifest,
+        manifest,
+        payload,
+        deployed_name,
+        manifest_messages,
     )
 
     changed = updated_manifest != original_manifest
@@ -243,12 +252,14 @@ def bump_images(
         )
 
         for image_config in authorized_configs:
+            deployed_name = effective_deployed_name(image_config, payload)
             for kustomize_manifest in image_config.kustomize_manifests:
                 if _apply_manifest(
                     kustomize_manifest,
                     update_kustomize_with_payload,
                     config_path,
                     payload,
+                    deployed_name,
                     commit_message,
                     dry_run=dry_run,
                 ):
@@ -259,6 +270,7 @@ def bump_images(
                     update_helm_values_with_payload,
                     config_path,
                     payload,
+                    deployed_name,
                     commit_message,
                     dry_run=dry_run,
                 ):
@@ -269,6 +281,7 @@ def bump_images(
                     update_file_with_payload,
                     config_path,
                     payload,
+                    deployed_name,
                     commit_message,
                     dry_run=dry_run,
                 ):

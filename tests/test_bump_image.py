@@ -232,6 +232,43 @@ def test_dagster_helm_and_kustomize_dry_run(
     assert extract_metadata(pr_body) is not None
 
 
+def test_mirrored_dagster_helm_bumps_via_deployed_as(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The case ``deployed_as`` exists to fix: a mirrored ``image.repository``.
+
+    ``tests/manifests/mirrored_dagster`` mirrors ``dagster_helm_kustomize``
+    but its ``values.yaml`` carries an ECR pull-through cache path (the
+    deployed name) as ``image.repository``, not the payload's upstream
+    ``gmri/sea-eagle-brown-3crs``. Without ``deployed_as`` telling
+    bump-images what the manifests actually deploy from, the Helm dagster
+    shorthand's selector would never match this file and bump-images would
+    fail the run entirely (a real, previously-unfixable failure mode -- see
+    the plan this fixture was added for).
+    """
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/sea-eagle-brown-3crs", client_payload)
+
+    bump_images(
+        config_path=MANIFESTS_DIR / "mirrored_dagster" / "image_manifest.yaml",
+        client_payload=client_payload.model_dump_json(),
+        dry_run=True,
+    )
+
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["changed"] == "true"
+
+    commit_message = outputs["commit_message"]
+    assert "Updated kustomize manifest" in commit_message
+    assert "Updated helm values" in commit_message
+    new_tag = client_payload.new_tag()
+    assert f"newTag to {new_tag}" in commit_message
+    assert f"image/tag to {new_tag}" in commit_message
+
+
 def test_environment_per_image_config_overrides_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -89,8 +89,14 @@ def test_config_location_child_of_an_empty_base_location_is_just_the_suffix() ->
 
 
 def test_template_keys_match_payload_value_format_kwargs() -> None:
+    """``deployed_image`` is the one ``TEMPLATE_KEYS`` entry not drawn from the payload.
+
+    It's added by ``apply_set_templates`` itself (see its docstring), so the
+    relationship is explicit rather than a loosened equality -- the two still
+    can't drift silently.
+    """
     payload = _payload()
-    assert set(payload.value_format_kwargs()) == TEMPLATE_KEYS
+    assert set(payload.value_format_kwargs()) | {"deployed_image"} == TEMPLATE_KEYS
 
 
 # --- File-level plumbing ------------------------------------------------------

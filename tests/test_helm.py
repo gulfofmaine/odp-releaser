@@ -68,7 +68,7 @@ def test_dagster_user_code_updates_matching_tag_and_preserves_rest() -> None:
     commit_message: list[str] = []
 
     result = update_helm_values_with_payload(
-        FIXTURE, values_text, manifest, payload, commit_message
+        FIXTURE, values_text, manifest, payload, IMAGE_NAME, commit_message
     )
 
     # The matching deployment's tag is bumped to the new tag.
@@ -97,7 +97,12 @@ def test_non_matching_image_raises() -> None:
 
     with pytest.raises(YAMLPathException):
         update_helm_values_with_payload(
-            FIXTURE, values_text, manifest, payload, commit_message
+            FIXTURE,
+            values_text,
+            manifest,
+            payload,
+            "gmri/not-in-this-file",
+            commit_message,
         )
 
 
@@ -114,8 +119,94 @@ def test_set_templates_apply_to_values_file() -> None:
     commit_message: list[str] = []
 
     result = update_helm_values_with_payload(
-        FIXTURE, values_text, manifest, payload, commit_message
+        FIXTURE, values_text, manifest, payload, IMAGE_NAME, commit_message
     )
 
     assert "tag: 9f8e7d6" not in result
     assert 'tag: "9f8e7d6"' in result
+
+
+# --- deployed_as / mirrored image.repository ---------------------------------
+
+MIRRORED_NAME = (
+    "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs"
+)
+
+MIRRORED_VALUES_TEXT = f"""\
+deployments:
+  - name: brown-3crs
+    image:
+      repository: {MIRRORED_NAME}
+      tag: "ee1cadc"
+      pullPolicy: IfNotPresent
+"""
+
+
+def test_mirrored_repository_is_bumpable_when_deployed_as_is_set() -> None:
+    """The case that is impossible today: image.repository holds the mirror.
+
+    Without a ``deployed_name`` distinct from ``payload.image_name``, this
+    values file's ``image.repository`` (the ECR pull-through path) never
+    matches the payload's upstream name and the dagster shorthand raises.
+    Passing the mirrored name as ``deployed_name`` is what makes it bumpable.
+    """
+    manifest = HelmManifest.model_validate(
+        {"path": "./values.yaml", "dagster_user_code": True}
+    )
+    payload = _payload()
+    commit_message: list[str] = []
+
+    result = update_helm_values_with_payload(
+        FIXTURE,
+        MIRRORED_VALUES_TEXT,
+        manifest,
+        payload,
+        MIRRORED_NAME,
+        commit_message,
+    )
+
+    assert f"repository: {MIRRORED_NAME}" in result
+    assert 'tag: "9f8e7d6"' in result
+    assert 'tag: "ee1cadc"' not in result
+
+
+def test_mirrored_repository_raises_without_deployed_as() -> None:
+    """Without deployed_as, the same mirrored file still can't be bumped."""
+    manifest = HelmManifest.model_validate(
+        {"path": "./values.yaml", "dagster_user_code": True}
+    )
+    payload = _payload()
+
+    with pytest.raises(YAMLPathException):
+        update_helm_values_with_payload(
+            FIXTURE, MIRRORED_VALUES_TEXT, manifest, payload, IMAGE_NAME, []
+        )
+
+
+def test_unmirrored_case_still_works_when_deployed_as_matches_image_name() -> None:
+    """The plain (unmirrored) case still works: deployed_name == image_name."""
+    values_text = FIXTURE.read_text(encoding="utf-8")
+    manifest = HelmManifest.model_validate(
+        {"path": "./values.yaml", "dagster_user_code": True}
+    )
+    payload = _payload()
+
+    result = update_helm_values_with_payload(
+        FIXTURE, values_text, manifest, payload, IMAGE_NAME, []
+    )
+
+    assert 'tag: "9f8e7d6"' in result
+
+
+def test_genuine_mismatch_still_raises() -> None:
+    """A deployed_name that matches nothing in the file still raises."""
+    values_text = FIXTURE.read_text(encoding="utf-8")
+    manifest = HelmManifest.model_validate(
+        {"path": "./values.yaml", "dagster_user_code": True}
+    )
+    payload = _payload()
+
+    with pytest.raises(YAMLPathException):
+        update_helm_values_with_payload(
+            FIXTURE, values_text, manifest, payload, "gmri/totally-different", []
+        )

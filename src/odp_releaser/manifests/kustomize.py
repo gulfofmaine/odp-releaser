@@ -44,6 +44,7 @@ def update_kustomize_with_payload(
     kustomize_text: str,
     manifest: KustomizeManifest,
     payload: ClientPayload,
+    deployed_name: str,
     commit_message: list[str],
 ) -> str:
     """Update an image entry (and any extra ``set`` paths) in a kustomization file.
@@ -61,6 +62,17 @@ def update_kustomize_with_payload(
     for the *other* pin mode (e.g. a stale ``newTag`` left over from before a
     switch to digest pinning), that's left untouched; reconciling it is on
     the operator.
+
+    ``deployed_name`` (see ``bump_images.effective_deployed_name``) is
+    deliberately *not* used to select the ``images:`` entry: kustomize's own
+    ``newName`` field is what actually carries a mirrored image name, so the
+    entry stays keyed on ``payload.image_name`` (the upstream name) whether
+    or not this config declares a ``deployed_as``. Passing ``deployed_name``
+    into the selector here would instead break the match for a repo that
+    mirrors -- ``newName`` and the ``name=`` key describe two different
+    things: what kustomize renders the image as, versus which entry to edit.
+    ``deployed_name`` is only threaded through for ``set`` templating (see
+    ``apply_set_templates``), same as the other engines.
     """
     processor = open_for_editing(kustomize_text)
     logger.debug(f"Original manifest for {kustomize_path}: {processor.data}")
@@ -87,7 +99,7 @@ def update_kustomize_with_payload(
         )
     commit_message.append(f"  - {message}")
 
-    apply_set_templates(processor, manifest.set, payload, commit_message)
+    apply_set_templates(processor, manifest.set, payload, deployed_name, commit_message)
 
     stream = StringIO()
 
