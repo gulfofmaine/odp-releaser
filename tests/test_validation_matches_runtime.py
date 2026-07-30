@@ -302,6 +302,13 @@ CASES = [
         build=_fixed(FIXTURES / "dagster_helm_kustomize" / "image_manifest.yaml"),
     ),
     Case(
+        "mirrored_dagster-push-clean",
+        "gmri/sea-eagle-brown-3crs",
+        EventType.push,
+        expect_error=False,
+        build=_fixed(FIXTURES / "mirrored_dagster" / "image_manifest.yaml"),
+    ),
+    Case(
         "key_error-push-broken-placeholder",
         "gmri/neracoos-mariners-dashboard",
         EventType.push,

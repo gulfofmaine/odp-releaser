@@ -80,11 +80,17 @@ from odp_releaser.schemas.manifest_config import (
     effective_deployed_name,
 )
 from odp_releaser.validation.cross_config import check_cross_config
+from odp_releaser.validation.deployed_as import (
+    check_deployed_as_and_sync,
+    check_file_manifest_set_upstream_name,
+    check_kustomize_deployed_as_agreement,
+)
 from odp_releaser.validation.diagnostics import Diagnostics
 from odp_releaser.validation.engine_backstop import (
     representative_event,
     run_engine_backstop,
 )
+from odp_releaser.validation.image_name_shape import image_name_shape_problems
 from odp_releaser.validation.manifest_text import load_manifest_text
 from odp_releaser.validation.ruamel_lines import line_for_index, line_for_key
 from odp_releaser.validation.unknown_keys import report_unknown_keys
@@ -108,8 +114,6 @@ if TYPE_CHECKING:
 TEMPLATE_KEYS: frozenset[str] = frozenset(
     {"new_tag", "git_sha", "digest", "payload", "deployed_image"}
 )
-
-_INVALID_IMAGE_NAME_CHARS = ("@", ":")
 
 
 @dataclass(frozen=True)
@@ -300,6 +304,7 @@ def validate_image_configs(
             config_path,
             image_name,
             image_config,
+            defaults,
             item_location,
             diagnostics,
             cache,
@@ -372,20 +377,15 @@ def _check_image_name(
 ) -> None:
     """The ``images:`` key must be a name a real payload could equal.
 
-    Mirrors :meth:`ClientPayload._validate_image_name` (no ``@``/``:``) plus
-    the shape every real image reference otherwise has (lowercase, no
-    surrounding whitespace, non-empty) -- a config keyed on anything else can
-    never equal ``payload.image_name`` and so can never match a bump.
+    The shape rules themselves live in :func:`image_name_shape_problems`,
+    shared with the identical check on ``ImageConfig.deployed_as`` (see
+    :mod:`odp_releaser.validation.deployed_as`) so the two can't drift --
+    a config keyed on (or declaring a mirror as) anything other than a
+    real image name can never equal ``payload.image_name`` (or a real
+    ``image.repository``/``newName``) and so can never match or agree with
+    anything.
     """
-    problems: list[str] = []
-    if not image_name:
-        problems.append("must not be empty")
-    if image_name != image_name.strip():
-        problems.append("must not have leading/trailing whitespace")
-    if image_name != image_name.lower():
-        problems.append("must not contain uppercase characters")
-    if any(char in image_name for char in _INVALID_IMAGE_NAME_CHARS):
-        problems.append("must not contain '@' or ':'")
+    problems = image_name_shape_problems(image_name)
     if not problems:
         return
     message = (
@@ -477,6 +477,7 @@ def _validate_config_item(
     config_path: Path,
     image_name: str,
     image_config: ImageConfig,
+    defaults: ConfigDefaults,
     location: ConfigLocation,
     diagnostics: Diagnostics,
     cache: dict[Path, str | None],
@@ -495,6 +496,10 @@ def _validate_config_item(
             location=location.location,
             line=location.line,
         )
+
+    check_deployed_as_and_sync(
+        image_name, image_config, defaults, location, diagnostics
+    )
 
     _check_repo_and_actor_shape(
         image_config.allowed_source_repos,
@@ -537,6 +542,7 @@ def _validate_config_item(
             cache,
             payload=payload,
             deployed_name=deployed_name,
+            deployed_as=image_config.deployed_as,
             event=event,
             check_files=check_files,
         )
@@ -565,6 +571,7 @@ def _validate_config_item(
             cache,
             payload=payload,
             deployed_name=deployed_name,
+            deployed_as=image_config.deployed_as,
             event=event,
             check_files=check_files,
         )
@@ -604,6 +611,7 @@ def _validate_kustomize(
     *,
     payload: ClientPayload | None,
     deployed_name: str,
+    deployed_as: str | None,
     event: str,
     check_files: bool,
 ) -> None:
@@ -673,6 +681,10 @@ def _validate_kustomize(
                 line=location.line,
             )
 
+        check_kustomize_deployed_as_agreement(
+            deployed_as, images_node, location, diagnostics
+        )
+
     if text is not None and len(diagnostics.errors) == error_count:
         resolved = resolve_manifest_path(config_path, manifest.path)
         run_engine_backstop(
@@ -733,6 +745,9 @@ def _validate_helm(
         if not _node_exists(processor, selector):
             diagnostics.error(
                 f"dagster_user_code is true but no {selector} entry exists; "
+                f"this matched on the deployed name {deployed_name!r} "
+                "(image_config.deployed_as if set, else the payload's "
+                "image_name -- see effective_deployed_name), and "
                 "bump-images sets its tag with mustexist=True, which raises",
                 location=location.child("dagster_user_code").location,
                 line=location.line,
@@ -764,6 +779,7 @@ def _validate_file_manifest(
     *,
     payload: ClientPayload | None,
     deployed_name: str,
+    deployed_as: str | None,
     event: str,
     check_files: bool,
 ) -> None:
@@ -784,6 +800,11 @@ def _validate_file_manifest(
         processor,
         payload,
         deployed_name,
+    )
+
+    upstream_name = payload.image_name if payload is not None else image_name
+    check_file_manifest_set_upstream_name(
+        manifest.set, deployed_as, upstream_name, location.child("set"), diagnostics
     )
 
     if text is not None and len(diagnostics.errors) == error_count:
