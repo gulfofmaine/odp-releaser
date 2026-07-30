@@ -160,6 +160,7 @@ jobs:
     permissions:
       contents: write # match bump-images.yml's declared job permissions; dry_run never pushes
       pull-requests: write # match bump-images.yml's declared job permissions; dry_run opens no PR
+      id-token: write # match bump-images.yml's declared job permissions; no sync is configured here
     uses: ./.github/workflows/bump-images.yml
     with:
       config_path: tests/e2e/image_manifest.yaml
@@ -173,6 +174,7 @@ jobs:
     permissions:
       contents: write # match bump-images.yml's declared job permissions; dry_run never pushes
       pull-requests: write # match bump-images.yml's declared job permissions; dry_run opens no PR
+      id-token: write # match bump-images.yml's declared job permissions; no sync is configured here
     uses: ./.github/workflows/bump-images.yml
     with:
       config_path: tests/e2e/image_manifest.yaml

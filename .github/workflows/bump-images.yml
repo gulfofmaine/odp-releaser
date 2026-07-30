@@ -22,6 +22,23 @@
 # awaits review, `deployed` once it lands. Both reports are best effort and
 # never fail the bump.
 #
+# When an image manifest declares a `deployed_as` with `sync: true`, the image
+# is also copied to that registry before the bump is committed. Supply
+# credentials for the destination either with the sync_aws_role_arn /
+# sync_aws_region inputs (ECR via OIDC) or the sync_registry / sync_username /
+# sync_password secrets (GHCR, Docker Hub). A failed copy fails the bump, on
+# purpose: a merged manifest pointing at an image nobody pushed is an outage.
+#
+# UPGRADING: this workflow now requests `id-token: write`, which is never
+# granted by default, and a called workflow's permissions can only be
+# maintained or reduced relative to its caller -- never elevated. So every
+# calling job must now grant it, even one that never syncs:
+#
+#   permissions:
+#     contents: write
+#     pull-requests: write
+#     id-token: write   # <- add this
+#
 # Minimal caller example:
 #
 #   on:
@@ -30,6 +47,10 @@
 #
 #   jobs:
 #     bump:
+#       permissions:
+#         contents: write
+#         pull-requests: write
+#         id-token: write
 #       uses: gulfofmaine/odp-releaser/.github/workflows/bump-images.yml@<ref>
 #       with:
 #         # config_path: .github/image_manifest.yaml            # optional
@@ -86,6 +107,33 @@ on:
         required: false
         type: boolean
         default: false
+      sync:
+        description: >-
+          Set false to skip the image sync even for configs whose `sync: true`
+          asks for one. Only relevant when the image manifest declares a
+          `deployed_as` with `sync: true`.
+        required: false
+        type: boolean
+        default: true
+      sync_aws_role_arn:
+        description: >-
+          IAM role to assume via OIDC before syncing, for an ECR destination.
+          When set, this workflow runs configure-aws-credentials and
+          amazon-ecr-login before the bump. Not a secret: a role ARN is not
+          sensitive, and OIDC needs no stored credential. The role's trust
+          policy keys on this *calling* repo (e.g.
+          `repo:my-org/my-deploy-repo:*`) -- the OIDC subject describes the
+          caller even though the login runs here, so each deploy repo gets its
+          own tightly scoped role and nothing has to trust every caller of this
+          workflow.
+        required: false
+        type: string
+        default: ""
+      sync_aws_region:
+        description: AWS region for sync_aws_role_arn.
+        required: false
+        type: string
+        default: ""
     outputs:
       image_name:
         description: Image name the bump ran for (no tag or digest).
@@ -146,6 +194,14 @@ on:
       comment_deployed_template:
         description: Resolved comment template for a landed bump, unrendered.
         value: ${{ jobs.bump.outputs.comment_deployed_template }}
+      sync_destinations:
+        description: >-
+          Newline-separated destination references the image was copied to;
+          empty when no config asked for a sync.
+        value: ${{ jobs.bump.outputs.sync_destinations }}
+      synced:
+        description: Whether the image sync actually ran ("true"/"false").
+        value: ${{ jobs.bump.outputs.synced }}
     secrets:
       ci_app_id:
         description: >-
@@ -179,6 +235,34 @@ on:
       reporter_app_private_key:
         description: Optional private key matching reporter_app_id.
         required: false
+      sync_registry:
+        description: >-
+          Registry host to `docker login` to before syncing, for a destination
+          that uses username/password auth (GHCR, Docker Hub). Leave unset when
+          using sync_aws_role_arn, or when no config asks for a sync.
+        required: false
+      sync_username:
+        description: Username for sync_registry.
+        required: false
+      sync_password:
+        description: Password or token for sync_registry.
+        required: false
+      sync_source_registry:
+        description: >-
+          Registry host to `docker login` to for the *source* side of a sync.
+          Only needed when the image is pulled from somewhere that requires
+          credentials the runner doesn't already have -- a private registry on a
+          different host than the destination, or Docker Hub, where an anonymous
+          pull shares the runner's IP rate limit. Since a failed copy fails the
+          bump on purpose, an unauthenticated source is a source of intermittent
+          release failures.
+        required: false
+      sync_source_username:
+        description: Username for sync_source_registry.
+        required: false
+      sync_source_password:
+        description: Password or token for sync_source_registry.
+        required: false
 
 permissions: {}
 
@@ -189,10 +273,20 @@ jobs:
     permissions:
       contents: write # commit the bump directly or push a PR branch
       pull-requests: write # open the bump pull request
+      # Only actually used when sync_aws_role_arn is set, but `permissions`
+      # cannot be conditional -- and a called workflow's permissions can only
+      # be maintained or reduced, never elevated, relative to the caller. So
+      # every caller has to grant this even if it never syncs; see the
+      # "Upgrading" note in this file's header.
+      id-token: write # assume the sync role via OIDC
     env:
       HAS_CI_APP: ${{ secrets.ci_app_id != '' }}
       HAS_REPORTER_APP:
         ${{ secrets.reporter_app_id != '' || secrets.reporter_apps != '' }}
+      # The `secrets` context is not available in a step-level `if:`, so the
+      # presence check has to be hoisted to the job env like the two above.
+      HAS_SYNC_LOGIN: ${{ secrets.sync_registry != '' }}
+      HAS_SYNC_SOURCE_LOGIN: ${{ secrets.sync_source_registry != '' }}
     concurrency:
       # client_payload.image_name is empty when this workflow is called
       # outside a repository_dispatch run (e.g. this repo's e2e CI); fall
@@ -218,6 +312,8 @@ jobs:
       comment_staged_template: ${{ steps.bump.outputs.comment_staged_template }}
       comment_deployed_template:
         ${{ steps.bump.outputs.comment_deployed_template }}
+      sync_destinations: ${{ steps.bump.outputs.sync_destinations }}
+      synced: ${{ steps.bump.outputs.synced }}
     steps:
       - name: Generate app token
         id: app-token
@@ -289,10 +385,48 @@ jobs:
         with:
           cache_suffix: odp-releaser-${{ job.workflow_sha }}
 
+      # Registry logins for the image sync, both no-ops when unconfigured.
+      # They run before the bump because the sync happens inside the
+      # bump_images action, between writing the manifests and committing
+      # them. skopeo picks these credentials up from
+      # $HOME/.docker/config.json via the containers credential search
+      # order, so no `skopeo login` is needed.
+      - name: Configure AWS credentials for the sync
+        if: inputs.sync_aws_role_arn != ''
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ inputs.sync_aws_role_arn }}
+          aws-region: ${{ inputs.sync_aws_region }}
+
+      - name: Log in to Amazon ECR for the sync
+        if: inputs.sync_aws_role_arn != ''
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Log in to the sync registry
+        if: env.HAS_SYNC_LOGIN == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ secrets.sync_registry }}
+          username: ${{ secrets.sync_username }}
+          password: ${{ secrets.sync_password }}
+
+      # The source side. The steps above authenticate the destination only,
+      # but the copy also has to *pull*, and `sync_source_ref` names the
+      # upstream registry -- which may be private, or may be Docker Hub, where
+      # an anonymous pull is subject to the shared runner IP's rate limit.
+      - name: Log in to the sync source registry
+        if: env.HAS_SYNC_SOURCE_LOGIN == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ secrets.sync_source_registry }}
+          username: ${{ secrets.sync_source_username }}
+          password: ${{ secrets.sync_source_password }}
+
       - name: Bump images
         id: bump
         uses: ./.odp-releaser/.github/actions/bump_images
         with:
+          sync: ${{ inputs.sync }}
           client_payload:
             ${{ inputs.client_payload || toJSON(github.event.client_payload) }}
           config_path: ${{ inputs.config_path }}
