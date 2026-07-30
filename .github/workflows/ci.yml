@@ -272,6 +272,223 @@ jobs:
             "$PR_COMMENT_DEPLOYED" "deployed to"
           exit "$fail"
 
+  # The only job anywhere in this repo that touches a real registry. The
+  # e2e-bump-* jobs above run --dry-run, which skips the sync step outright, so
+  # without this the sync shell -- the destination loop, the skip-if-identical
+  # check and the digest verification -- would ship untested.
+  #
+  # The script under test is *extracted* from bump_images/action.yml rather
+  # than restated here, so this cannot quietly drift from what actually runs.
+  # registry:2 speaks plain HTTP, so skopeo is told to treat it as insecure via
+  # registries.conf -- confined to this job, rather than adding a
+  # --tls-verify escape hatch to the action's own inputs for the sake of a test.
+  e2e-sync:
+    name: E2E image sync (local registry)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      registry:
+        # registry:2, pinned to its multi-arch index digest
+        image: registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Trust the plain-HTTP test registry
+        run: |
+          # Replaces the file rather than appending to it. The ubuntu runner
+          # ships a v1-format registries.conf (a `[registries.search]` table),
+          # and containers/image refuses outright to load a file that mixes
+          # the v1 and v2 formats -- appending a `[[registry]]` block gives
+          # "mixing sysregistry v1/v2 is not supported" and every skopeo call
+          # fails. Nothing here needs the v1 search list: every reference in
+          # this job is fully qualified, and search registries only ever apply
+          # to unqualified short names.
+          sudo tee /etc/containers/registries.conf >/dev/null <<'CONF'
+          [[registry]]
+          location = "127.0.0.1:5000"
+          insecure = true
+          CONF
+
+      - name: Extract the sync script from the composite action
+        run: |
+          uv run --no-project --with pyyaml python - <<'PY'
+          import pathlib
+
+          import yaml
+
+          action = yaml.safe_load(
+              pathlib.Path(".github/actions/bump_images/action.yml").read_text()
+          )
+          step = next(s for s in action["runs"]["steps"] if s.get("id") == "sync")
+          pathlib.Path("sync.sh").write_text(step["run"])
+          PY
+          test -s sync.sh
+
+      - name: Seed a multi-arch source image into the test registry
+        run: |
+          # mirror.gcr.io rather than Docker Hub directly: no auth and no anonymous
+          # pull limits, while still serving a real multi-arch manifest list.
+          skopeo copy --all --preserve-digests \
+            docker://mirror.gcr.io/library/alpine:3.20 \
+            docker://127.0.0.1:5000/odp-releaser-e2e-sync-src:seed
+
+      - name: Sync to the test registry and assert
+        run: |
+          set -euo pipefail
+
+          SRC_REPO=127.0.0.1:5000/odp-releaser-e2e-sync-src
+          DST_A=127.0.0.1:5000/odp-releaser-e2e-sync-dst-a:v1.2.3
+          DST_B=127.0.0.1:5000/odp-releaser-e2e-sync-dst-b:v1.2.3
+
+          digest_of() {
+            skopeo inspect --raw "docker://$1" | sha256sum | cut -d' ' -f1
+          }
+          platforms_of() {
+            skopeo inspect --raw "docker://$1" | jq '.manifests | length'
+          }
+
+          SRC_DIGEST="sha256:$(digest_of "$SRC_REPO:seed")"
+          SRC_PLATFORMS="$(platforms_of "$SRC_REPO:seed")"
+          echo "source $SRC_DIGEST with $SRC_PLATFORMS manifests"
+
+          export SOURCE_REF="$SRC_REPO@$SRC_DIGEST"
+          # Two destinations, so the loop's fan-out path is exercised and not
+          # just its single-item case. Built with printf rather than a literal
+          # two-line string: the newline has to survive YAML block-scalar
+          # dedenting, and a stray leading space would make the second
+          # destination an invalid reference.
+          export DESTINATIONS="$(printf '%s\n%s' "$DST_A" "$DST_B")"
+          export EXPECTED_DIGEST="$SRC_DIGEST"
+          export GITHUB_OUTPUT="$RUNNER_TEMP/sync_output"
+
+          # GITHUB_OUTPUT is append-only, and a real step gets a fresh one per
+          # invocation. This job runs the script several times in a single
+          # step, so truncate between runs or the outputs accumulate and no
+          # longer look like what a real run produces.
+          run_sync() {
+            : > "$GITHUB_OUTPUT"
+            bash sync.sh 2>&1 | tee "$1"
+          }
+
+          echo "::group::first sync"
+          run_sync first.log
+          echo "::endgroup::"
+          FIRST_OUTPUT="$(cat "$GITHUB_OUTPUT")"
+
+          echo "::group::second sync (must skip, not re-push)"
+          run_sync second.log
+          echo "::endgroup::"
+          SECOND_OUTPUT="$(cat "$GITHUB_OUTPUT")"
+
+          fail=0
+          expect() {
+            if [ "$2" = "$3" ]; then
+              echo "ok: $1"
+            else
+              echo "::error::$1: expected '$3', got '$2'"
+              fail=1
+            fi
+          }
+
+          # --preserve-digests held and the index was not rewritten in transit.
+          expect "destination A digest" "sha256:$(digest_of "$DST_A")" \
+            "$SRC_DIGEST"
+          expect "destination B digest" "sha256:$(digest_of "$DST_B")" \
+            "$SRC_DIGEST"
+          DST="$DST_A"
+
+          # The --all regression guard. Without --all skopeo copies only the
+          # runner's own architecture and --preserve-digests does not object, it
+          # just preserves that single image's digest instead of the index's --
+          # so this is the assertion that would catch losing the flag.
+          expect "destination manifest count" "$(platforms_of "$DST")" \
+            "$SRC_PLATFORMS"
+          if [ "$SRC_PLATFORMS" -lt 2 ]; then
+            echo "::error::source is not multi-arch, so the --all guard above is vacuous"
+            fail=1
+          fi
+
+          # Both runs report synced=true: one that copied, and one where every
+          # destination was already up to date.
+          expect "synced output after copying" "$FIRST_OUTPUT" "synced=true"
+          expect "synced output after skipping" "$SECOND_OUTPUT" "synced=true"
+
+          # Both destinations must be reported, not just the first: this is
+          # what catches the loop silently processing one item.
+          for dst in "$DST_A" "$DST_B"; do
+            if ! grep -q "$dst" first.log; then
+              echo "::error::first run never mentioned $dst"
+              fail=1
+            fi
+          done
+
+          # The second run must take the skip path rather than re-pushing: a
+          # registry with tag immutability would reject the re-push outright.
+          if ! grep -q "is already $SRC_DIGEST; skipping" second.log; then
+            echo "::error::second run did not report skipping an identical digest"
+            fail=1
+          fi
+          if grep -q "^Copying " second.log; then
+            echo "::error::second run copied again instead of skipping"
+            fail=1
+          fi
+
+          # A destination holding a DIFFERENT digest must be re-copied, not
+          # skipped. Only the digests-match case is a no-op; this is the path
+          # that moves a mirror tag onto a new release.
+          echo "::group::occupy destination B with a different image"
+          skopeo copy --all --preserve-digests \
+            docker://mirror.gcr.io/library/busybox:stable \
+            "docker://$DST_B"
+          echo "::endgroup::"
+          OTHER_DIGEST="sha256:$(digest_of "$DST_B")"
+          if [ "$OTHER_DIGEST" = "$SRC_DIGEST" ]; then
+            echo "::error::the two test images share a digest, so the recopy check is vacuous"
+            fail=1
+          fi
+
+          echo "::group::third sync (must re-copy B, still skip A)"
+          run_sync third.log
+          echo "::endgroup::"
+          expect "destination B re-copied" "sha256:$(digest_of "$DST_B")" \
+            "$SRC_DIGEST"
+          if ! grep -q "^Copying .* to $DST_B$" third.log; then
+            echo "::error::third run did not re-copy the mismatched destination"
+            fail=1
+          fi
+          if ! grep -q "$DST_A is already $SRC_DIGEST; skipping" third.log; then
+            echo "::error::third run should still have skipped the matching destination"
+            fail=1
+          fi
+
+          # The post-copy verification must fail the step when the destination
+          # does not end up at the expected digest. Exercised by lying about
+          # the expected digest, which is the only way to reach it without a
+          # registry that rewrites manifests.
+          echo "::group::mismatch must fail the step"
+          if EXPECTED_DIGEST="sha256:$(printf '0%.0s' $(seq 64))" \
+            DESTINATIONS=127.0.0.1:5000/odp-releaser-e2e-sync-dst-c:v1.2.3 \
+            bash sync.sh >mismatch.log 2>&1; then
+            echo "::error::a destination digest mismatch did not fail the step"
+            fail=1
+          else
+            echo "ok: digest mismatch failed the step"
+          fi
+          echo "::endgroup::"
+          if ! grep -q "but the manifests were bumped to" mismatch.log; then
+            echo "::error::mismatch failure did not explain itself"
+            fail=1
+          fi
+
+          exit "$fail"
+
   pass:
     name: All checks passed
     if: always()
@@ -284,6 +501,7 @@ jobs:
         e2e-bump-commit,
         e2e-bump-pr,
         e2e-assert,
+        e2e-sync,
       ]
     runs-on: ubuntu-slim
     timeout-minutes: 2
