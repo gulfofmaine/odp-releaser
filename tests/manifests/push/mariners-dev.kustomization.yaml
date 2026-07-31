@@ -19,7 +19,7 @@ resources:
 
 images:
   - name: gmri/neracoos-mariners-dashboard
-    newName: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/neracoos-mariners-dashboard
+    newName: 123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/neracoos-mariners-dashboard
     newTag: "5763586"
 
 patches:

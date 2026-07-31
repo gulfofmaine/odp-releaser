@@ -2,7 +2,7 @@ images:
   gmri/sea-eagle-brown-3crs:
     - events:
         - push
-      deployed_as: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs
+      deployed_as: 123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs
       kustomize_manifests:
         - ./kustomization.yaml
       helm_charts:

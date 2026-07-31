@@ -157,14 +157,14 @@ def test_file_manifest_requires_set() -> None:
 def test_image_config_deployed_as_and_sync_parse() -> None:
     config = ImageConfig.model_validate(
         {
-            "deployed_as": "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs",
+            "deployed_as": "123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs",
             "sync": True,
         }
     )
 
     assert (
         config.deployed_as
-        == "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs"
+        == "123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs"
     )
     assert config.sync is True
 

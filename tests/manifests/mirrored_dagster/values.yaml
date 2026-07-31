@@ -1,7 +1,7 @@
 deployments:
   - name: brown-3crs
     image:
-      repository: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs
+      repository: 123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs
       tag: "ee1cadc"
       pullPolicy: IfNotPresent
     dagsterApiGrpcArgs:

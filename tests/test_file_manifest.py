@@ -111,9 +111,7 @@ def test_deployed_image_template_renders_the_mirrored_name() -> None:
     ``ImageConfig.deployed_name``).
     """
     path = FIXTURE_DIR / "deployment.yaml"
-    mirrored_name = (
-        "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/example"
-    )
+    mirrored_name = "123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/example"
     manifest = FileManifest.model_validate(
         {
             "path": "./deployment.yaml",

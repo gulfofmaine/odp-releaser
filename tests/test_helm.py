@@ -129,7 +129,7 @@ def test_set_templates_apply_to_values_file() -> None:
 # --- deployed_as / mirrored image.repository ---------------------------------
 
 MIRRORED_NAME = (
-    "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs"
+    "123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs"
 )
 
 MIRRORED_VALUES_TEXT = f"""\

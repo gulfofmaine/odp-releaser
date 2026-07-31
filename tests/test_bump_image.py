@@ -1312,7 +1312,7 @@ images:
       deployed_as: ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev
       sync: true
     - events: [push]
-      deployed_as: 705162855742.dkr.ecr.us-east-1.amazonaws.com/gmri/mariners-dashboard
+      deployed_as: 123456789.dkr.ecr.us-east-1.amazonaws.com/gmri/mariners-dashboard
       sync: true
 """
     )
@@ -1326,7 +1326,7 @@ images:
         [
             f"ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev:{new_tag}",
             (
-                "705162855742.dkr.ecr.us-east-1.amazonaws.com/gmri/"
+                "123456789.dkr.ecr.us-east-1.amazonaws.com/gmri/"
                 f"mariners-dashboard:{new_tag}"
             ),
         ]
@@ -1374,7 +1374,7 @@ def test_sync_destinations_empty_when_sync_is_unset_or_false(
 images:
   gmri/neracoos-mariners-dashboard:
     - events: [push]
-      deployed_as: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/mariners
+      deployed_as: 123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/mariners
     - events: [push]
       deployed_as: ghcr.io/gulfofmaine/mariners-explicit-false
       sync: false
