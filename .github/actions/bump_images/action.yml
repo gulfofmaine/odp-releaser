@@ -81,7 +81,7 @@ inputs:
       for the destination registry already established by an earlier login step.
     required: false
     default: "true"
-  dry_run:
+  dry_run: # group: Testing aids
     description: >-
       When "true", run the CLI with --dry-run (no manifest files written) and
       skip the stage, commit, and pull-request steps. Outputs are still
@@ -97,21 +97,21 @@ inputs:
       bump-images.yml reusable workflow mints one automatically.
     required: false
     default: ${{ github.token }}
-  reporter_apps:
+  reporter_apps: # group: Reporter app credentials
     description: >-
       Optional JSON object mapping source owner -> {app_id, private_key}
       reporter app credentials. Used (with organization "Members: read" granted
       to the app) to check `allowed_actors` team membership against source orgs.
     required: false
     default: ""
-  reporter_app_id:
+  reporter_app_id: # group: Reporter app credentials
     description: >-
       Optional App ID of the source org's reporter GitHub App, used to check
       `allowed_actors` team membership. Fallback for owners not in
       reporter_apps.
     required: false
     default: ""
-  reporter_app_private_key:
+  reporter_app_private_key: # group: Reporter app credentials
     description: Optional private key matching reporter_app_id.
     required: false
     default: ""
@@ -162,7 +162,9 @@ outputs:
     description: Generated pull request title for the bump.
     value: ${{ steps.bump.outputs.pr_title }}
   pr_body:
-    description: Generated pull request body for the bump.
+    description: >-
+      Generated pull request body for the bump (includes the embedded report
+      metadata).
     value: ${{ steps.bump.outputs.pr_body }}
   reviewers:
     description:
@@ -187,7 +189,7 @@ outputs:
   comment_staged_template:
     description:
       Resolved comment template for a bump pull request awaiting review,
-      unrendered.
+      unrendered; pass to comment_on_pr.
     value: ${{ steps.bump.outputs.comment_staged_template }}
   comment_deployed_template:
     description: Resolved comment template for a landed bump, unrendered.
@@ -203,9 +205,10 @@ outputs:
       copied to; empty when no config asked for a sync.
     value: ${{ steps.bump.outputs.sync_destinations }}
   synced:
-    description:
+    description: >-
       Whether the sync step actually ran to completion ("true"/"false"). False
-      when nothing was configured, the sync was skipped, or this was a dry run.
+      when nothing was configured, the sync was skipped (sync: "false"), or this
+      was a dry run.
     value: ${{ steps.sync.outputs.synced || 'false' }}
 
 runs:

@@ -4,6 +4,8 @@ icon: lucide/chart-no-axes-gantt
 
 # Dump GitHub Events
 
+For development, it may be useful to dump GitHub event info.
+
 ```yml
 name: "Dump GitHub Event"
 

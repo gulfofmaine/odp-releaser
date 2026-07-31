@@ -17,5 +17,5 @@ helmCharts:
 
 images:
   - name: gmri/sea-eagle-brown-3crs
-    newName: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs
+    newName: 123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/sea-eagle-brown-3crs
     newTag: "ee1cadc"

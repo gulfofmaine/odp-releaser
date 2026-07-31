@@ -334,7 +334,7 @@ class ImageConfig(BaseModel):
                 "The image name the manifests under this config actually "
                 "deploy from, when it differs from the payload's "
                 "image_name -- e.g. an ECR pull-through cache path such as "
-                "'705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
+                "'123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
                 "gmri/sea-eagle-brown-3crs' mirroring upstream "
                 "'gmri/sea-eagle-brown-3crs'. Used as the Helm dagster "
                 "shorthand's image.repository selector and in `set` "
@@ -618,7 +618,7 @@ EXAMPLE_MANIFEST = ManifestConfig(
                 # the first time something pulls the mirrored path, so there
                 # is nothing for odp-releaser to copy.
                 deployed_as=(
-                    "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
+                    "123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
                     "gmri/neracoos-mariners-dashboard"
                 ),
                 kustomize_manifests=[

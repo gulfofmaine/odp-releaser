@@ -123,19 +123,19 @@ inputs:
       CLI's -v/-vv/-vvv flags (capped at 3).
     required: false
     default: "1"
-  reporter_apps:
+  reporter_apps: # group: Reporter app credentials
     description: >-
       JSON object mapping source owner -> {app_id, private_key} reporter app
       credentials, for deploy repos that report to multiple source orgs.
     required: false
     default: ""
-  reporter_app_id:
+  reporter_app_id: # group: Reporter app credentials
     description: >-
       App ID of the reporter GitHub App installed on the source repos. It must
       be granted `Pull requests: Read and write` for commenting.
     required: false
     default: ""
-  reporter_app_private_key:
+  reporter_app_private_key: # group: Reporter app credentials
     description: Private key matching reporter_app_id.
     required: false
     default: ""

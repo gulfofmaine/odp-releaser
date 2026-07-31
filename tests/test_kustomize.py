@@ -20,7 +20,7 @@ resources:
 
 images:
   - name: gmri/neracoos-mariners-dashboard
-    newName: 705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/neracoos-mariners-dashboard
+    newName: 123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/gmri/neracoos-mariners-dashboard
     newTag: "5763586"
 """
 
@@ -149,7 +149,7 @@ def test_deployed_as_does_not_change_which_images_entry_is_matched() -> None:
     manifest = KustomizeManifest.model_validate({"path": "./kustomization.yaml"})
     payload = _payload()
     mirrored_name = (
-        "705162855742.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
+        "123456789.dkr.ecr.us-east-1.amazonaws.com/docker-hub/"
         "gmri/neracoos-mariners-dashboard"
     )
 
