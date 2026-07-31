@@ -240,6 +240,30 @@ in the same checkout the validator is run against:
 odp-releaser validate image-manifest --no-check-files
 ```
 
+### Relaxing validation
+
+There is no way to switch off one individual check by name
+([#47](https://github.com/gulfofmaine/odp-releaser/issues/47) tracks whether
+there should be). What exists instead:
+
+- **Severity.** Warnings never fail a run unless you pass `--strict`, and
+  `bump-images` never fails on a warning at all. A check whose correctness
+  depends on something the validator can't see — cluster state, another
+  process — is a warning for exactly this reason, so the usual answer to "this
+  finding doesn't apply to us" is to not run `--strict`.
+- **`--no-check-files`.** Skips every check that has to read a referenced
+  manifest: selector resolution, the kustomize pin and `newName` checks, the
+  Helm dagster check, and the engine backstop. Coarse, but it is the one flag
+  that turns off a whole family.
+- **pre-commit.** The hooks are ordinary pre-commit hooks, so a consumer repo
+  can skip one for a single commit (`SKIP=validate-image-manifest git commit`),
+  narrow what it runs against with `files:`/`exclude:`, or pass flags through
+  with `args: [--no-check-files]`.
+
+If a check is wrong for a legitimate config rather than merely unwanted, that's
+worth reporting as a bug — a rule that a correct config cannot satisfy is a
+defect in the rule, not something to suppress.
+
 ### What is checked
 
 Every check exists because a config that is *shaped* correctly can still *mean*
@@ -266,8 +290,7 @@ consequence at bump time — that's the reason it exists.
 | Referenced manifest file can't be read or parsed (unless `--no-check-files`) | `bump-images` fails the same way when it tries to load the file mid-run |
 | `deployed_as` isn't a valid image name (empty, whitespace, uppercase, contains `@`/`:`) | Used as the Helm dagster shorthand's `image.repository` selector and in `set` templating via `{deployed_image}`, so it must be a plain image name like a real payload's `image_name` |
 | `sync: true` (directly, or inherited from `defaults.sync`) with no `deployed_as` set | There is nothing for odp-releaser to copy the payload's image to |
-| A kustomize manifest's `/images[name=...]` entry has no `newName`, but `deployed_as` is set | Kustomize would still render the upstream image, not the mirror the config declares |
-| A kustomize manifest's `/images[name=...]/newName` disagrees with `deployed_as` | The manifest and the config disagree about which registry this image actually deploys from |
+| The real manifest engine raises on this manifest, even though every check above passed | `bump-images` fails the same way mid-run. This is the backstop: rather than predicting the engines, the validator runs them against the manifest's actual text, so a failure mode the checks above don't model is still caught |
 
 **Warnings** (reported; fail the run only with `--strict`):
 
@@ -286,6 +309,8 @@ consequence at bump time — that's the reason it exists.
 | Multiple configs matching the same event disagree on `update_mode` or a resolved setting (`environment`, `environment_url`, `reviewers`, `team_reviewers`, `comment`) | `bump-images` warns and silently uses the first config's value |
 | `deployed_as` is set to the same value as this image's own `images:` key | Redundant: `ImageConfig.deployed_name` already falls back to the `images:` key when `deployed_as` is unset, so this declares nothing new |
 | A kustomize manifest's `/images[name=...]/newName` is set but no `deployed_as` declares it | `sync` and the Helm dagster shorthand can't see this mirror |
+| A kustomize manifest's `/images[name=...]` entry has no `newName`, but `deployed_as` is set | Kustomize renders the upstream image rather than the mirror the config declares — which is correct if the mirror is a node-level registry mirror or pull-through cache, and wrong otherwise. Only the cluster knows which, so this reports rather than blocks |
+| A kustomize manifest's `/images[name=...]/newName` disagrees with `deployed_as` | The manifest and the config name different registries. Usually a mistake, so the deploy pulls the wrong image — but legitimate if something else populates `newName`'s registry, so this reports rather than blocks |
 | A `file_manifests` `set` value hard-codes the upstream image name while `deployed_as` is set on the same config | Almost certainly meant to reference `{deployed_image}` instead — otherwise the wrong registry gets written |
 | Two configs writing the same resolved manifest path resolve different `deployed_as` values | The manifest can only agree with one mirror; at least one config is wrong about what it actually deploys |
 

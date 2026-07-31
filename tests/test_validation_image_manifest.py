@@ -1172,7 +1172,7 @@ images:
     assert diagnostics.diagnostics == ()
 
 
-def test_kustomize_new_name_disagrees_with_deployed_as_errors(tmp_path: Path) -> None:
+def test_kustomize_new_name_disagrees_with_deployed_as_warns(tmp_path: Path) -> None:
     (tmp_path / "kustomization.yaml").write_text(
         'images:\n  - name: gmri/app\n    newName: ghcr.io/gmri/other-mirror\n    newTag: "1"\n'
     )
@@ -1188,11 +1188,12 @@ images:
 """,
     )
     diagnostics = validate_image_manifest(path)
-    assert diagnostics.failed() is True
+    assert diagnostics.failed() is False
+    assert diagnostics.failed(strict=True) is True
     assert any("disagree about which registry" in m for m in _messages(diagnostics))
 
 
-def test_kustomize_new_name_missing_when_deployed_as_set_errors(
+def test_kustomize_new_name_missing_when_deployed_as_set_warns(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "kustomization.yaml").write_text(
@@ -1210,8 +1211,37 @@ images:
 """,
     )
     diagnostics = validate_image_manifest(path)
-    assert diagnostics.failed() is True
+    assert diagnostics.failed() is False
+    assert diagnostics.failed(strict=True) is True
     assert any("config declares" in m for m in _messages(diagnostics))
+
+
+def test_sync_to_a_node_level_mirror_without_new_name_is_not_fatal(
+    tmp_path: Path,
+) -> None:
+    """A node-level registry mirror is expressible: ``sync`` needs ``deployed_as``,
+    and ``deployed_as`` no longer demands a ``newName`` the operator deliberately
+    left out. While the missing-``newName`` check was an error these two rules
+    could not both be satisfied, which hard-blocked the release too, since
+    ``bump_images._preflight`` runs the same checks."""
+    (tmp_path / "kustomization.yaml").write_text(
+        'images:\n  - name: gmri/app\n    newTag: "1"\n'
+    )
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [push]
+      deployed_as: ghcr.io/gmri/mirror
+      sync: true
+      kustomize_manifests:
+        - ./kustomization.yaml
+""",
+    )
+    diagnostics = validate_image_manifest(path)
+    assert diagnostics.errors == ()
+    assert diagnostics.failed() is False
 
 
 def test_kustomize_new_name_present_without_deployed_as_warns(tmp_path: Path) -> None:
@@ -1747,6 +1777,87 @@ def test_validate_image_configs_from_models_alone_produces_diagnostics(
     )
     assert diagnostics.failed() is True
     assert any("bare team slug" in m for m in _messages(diagnostics))
+
+
+def test_event_filtered_config_keeps_its_index_in_the_file(tmp_path: Path) -> None:
+    """The payload's event filter must not renumber the surviving configs.
+
+    Only the third ``images:`` entry matches a ``push`` payload, so its
+    diagnostics have to say ``[2]`` -- the entry someone can actually go and
+    edit -- not ``[0]``.
+    """
+    path = _write(
+        tmp_path,
+        """
+images:
+  gmri/app:
+    - events: [release]
+      team_reviewers: [ok]
+    - events: [release]
+      team_reviewers: [ok]
+    - events: [push]
+      team_reviewers: [org/bad]
+""",
+    )
+    diagnostics = validate_image_manifest(path, payload=_payload(), check_files=False)
+
+    assert any("bare team slug" in m for m in _messages(diagnostics))
+    assert any(
+        (location or "").startswith('images."gmri/app"[2]')
+        for location in _locations(diagnostics)
+    )
+
+
+def test_validate_image_configs_reports_the_index_in_the_file_not_in_the_filtered_list(
+    tmp_path: Path,
+) -> None:
+    """``config_indices`` keeps a filtered caller's locations honest.
+
+    ``bump_images`` filters by event and authorization before calling this, so
+    numbering the survivors would attribute a finding about the third
+    ``images:`` entry to the first.
+    """
+    third = ImageConfig.model_validate(
+        {"events": ["push"], "team_reviewers": ["org/bad"]}
+    )
+    diagnostics = validate_image_configs(
+        tmp_path / "image_manifest.yaml",
+        "gmri/app",
+        [third],
+        ConfigDefaults(),
+        check_files=False,
+        config_indices=[2],
+    )
+
+    assert any(
+        (location or "").startswith('images."gmri/app"[2]')
+        for location in _locations(diagnostics)
+    )
+    assert not any(
+        (location or "").startswith('images."gmri/app"[0]')
+        for location in _locations(diagnostics)
+    )
+
+
+def test_validate_image_configs_numbers_an_unfiltered_list_from_zero(
+    tmp_path: Path,
+) -> None:
+    configs = [
+        ImageConfig.model_validate({"events": ["push"]}),
+        ImageConfig.model_validate({"events": ["push"], "team_reviewers": ["org/bad"]}),
+    ]
+    diagnostics = validate_image_configs(
+        tmp_path / "image_manifest.yaml",
+        "gmri/app",
+        configs,
+        ConfigDefaults(),
+        check_files=False,
+    )
+
+    assert any(
+        (location or "").startswith('images."gmri/app"[1]')
+        for location in _locations(diagnostics)
+    )
 
 
 def test_validate_image_configs_appends_to_passed_diagnostics(tmp_path: Path) -> None:
