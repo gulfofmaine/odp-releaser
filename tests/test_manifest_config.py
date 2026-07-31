@@ -21,7 +21,7 @@ from odp_releaser.schemas.manifest_config import (
     KustomizeManifest,
     ManifestConfig,
     ResolvedComment,
-    configs_for_event,
+    indexed_configs_for_event,
     resolve_comment_config,
     resolve_setting,
 )
@@ -216,7 +216,7 @@ def test_sync_unset_with_no_default_falls_back_to_none() -> None:
     assert resolve_setting(config.sync, defaults.sync) is None
 
 
-# --- ImageConfig.matches_event / configs_for_event ----------------------------
+# --- ImageConfig.matches_event / indexed_configs_for_event --------------------
 
 
 def test_matches_event_none_matches_every_event() -> None:
@@ -234,14 +234,24 @@ def test_matches_event_only_matches_listed_events() -> None:
     assert not config.matches_event("release")
 
 
-def test_configs_for_event_filters_and_preserves_config_order() -> None:
+def test_indexed_configs_for_event_filters_and_preserves_config_order() -> None:
     matches_all = ImageConfig(events=None)
     push_only = ImageConfig(events=["push"])
     release_only = ImageConfig(events=["release"])
 
-    result = configs_for_event([push_only, matches_all, release_only], "push")
+    result = indexed_configs_for_event([push_only, matches_all, release_only], "push")
 
-    assert result == [push_only, matches_all]
+    assert result == [(0, push_only), (1, matches_all)]
+
+
+def test_indexed_configs_for_event_keeps_the_unfiltered_index() -> None:
+    """A survivor's index is its position in the original list, not in the result."""
+    release_only = ImageConfig(events=["release"])
+    push_only = ImageConfig(events=["push"])
+
+    result = indexed_configs_for_event([release_only, release_only, push_only], "push")
+
+    assert result == [(2, push_only)]
 
 
 # --- resolve_comment_config ---------------------------------------------------
