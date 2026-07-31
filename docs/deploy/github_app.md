@@ -2,7 +2,7 @@
 icon: lucide/key-round
 ---
 
-# GitHub Apps
+# Deployment GitHub Apps
 
 A deploy org owns the apps in this relationship: the **dispatch app** that
 source repos use to notify its deploy repos, and the **reporter app** that reaches back out to report deployments. The trust boundary that this ownership split gives is covered in

@@ -2,7 +2,7 @@
 icon: lucide/key-round
 ---
 
-# GitHub Apps
+# Interaction with GitHub Apps
 
 A source repo never *owns* a GitHub App in this setup. It holds credentials
 handed to it by each deploy org it dispatches into, and it optionally consents

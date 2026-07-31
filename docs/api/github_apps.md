@@ -2,7 +2,7 @@
 icon: lucide/key-round
 ---
 
-# GitHub Apps
+# The GitHub Apps' roles
 
 `odp-releaser` moves container images across an organizational trust boundary: a
 public **source** repo (which built and pushed an image) tells a private

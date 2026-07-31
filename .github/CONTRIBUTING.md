@@ -23,8 +23,9 @@ Three tools do most of the work here:
 - [**prek**](https://prek.j178.dev/) runs the git hooks (a Rust drop-in for
   pre-commit). `uv tool install prek`, or `brew install prek` on macOS.
 
-There is also a [dev container](../.devcontainer/devcontainer.json) if you'd
-rather not set any of that up locally.
+There is also a
+[dev container](https://github.com/gulfofmaine/odp-releaser/blob/main/.devcontainer/devcontainer.json)
+if you'd rather not set any of that up locally.
 
 ## Quick development
 

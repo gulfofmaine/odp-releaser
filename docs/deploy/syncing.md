@@ -5,8 +5,7 @@ icon: lucide/copy
 # Syncing images
 
 Every manifest engine keys its update off the payload's own `image_name` by
-default. This can be changed with two `ImageConfig` settings change that when a deploy repo doesn't
-deploy the payload's image name verbatim — most commonly because it pulls
+default. This can be changed with two `ImageConfig` settings, for when a deploy repo doesn't deploy the payload's image name verbatim — most commonly because it pulls
 through a cloud-native registry mirror instead of the upstream registry:
 
 - **`deployed_as`** — the image name the manifests under *this config* actually
