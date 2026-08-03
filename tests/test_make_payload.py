@@ -457,8 +457,7 @@ def test_make_payload_cli_rejects_malformed_digest(tmp_path: Path) -> None:
             "make-payload",
             "ghcr.io/gulfofmaine/climatology_py_dash",
             "3f52d83",
-            "gmri/neracoos-climatology-py-dash@sha256:"
-            "041d1a8c2ef53044d3ea25d686e92e3ba02b25e8c9dbe1aa2d0d4ef27089ed39",
+            "gmri/neracoos-climatology-py-dash@sha256:041d1a8c2ef53044d3ea25d686e92e3ba02b25e8c9dbe1aa2d0d4ef27089ed39",
         ],
         env={
             "GITHUB_EVENT_NAME": "push",
