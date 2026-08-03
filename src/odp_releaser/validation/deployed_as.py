@@ -178,13 +178,26 @@ def check_kustomize_deployed_as_agreement(
     declares, or the two simply naming different mirrors -- is exactly the
     kind of drift that stays invisible until ``sync`` or the Helm dagster
     shorthand silently use the wrong name.
+
+    Every finding here is a *warning*, unlike most of the ``deployed_as``
+    checks, because agreement is only knowable from inside the cluster.
+    ``update_kustomize_with_payload`` never writes ``newName`` -- it is
+    operator-managed -- so a repo whose mirror is a node-level registry
+    mirror (a containerd ``mirrors`` entry, or an ECR pull-through cache)
+    deliberately keeps the bare upstream name in the manifest and rewrites
+    the pull on the node. That config still wants ``deployed_as`` (it is what
+    ``sync`` copies to), so making the missing-``newName`` case an error left
+    it in a checkmate with the ``sync``-without-``deployed_as`` error above:
+    two rules that could not both be satisfied. Every other error in this
+    module is provable from the config and manifest alone; these two are
+    claims about Kubernetes, so they report and let ``--strict`` decide.
     """
     if not isinstance(images_node, Mapping):
         return
     new_name = images_node.get("newName")
     if deployed_as is not None:
         if new_name is None:
-            diagnostics.error(
+            diagnostics.warning(
                 f"deployed_as is {deployed_as!r}, but this images: entry has "
                 "no newName; kustomize would still render the upstream "
                 "image, not the mirror this config declares",
@@ -192,7 +205,7 @@ def check_kustomize_deployed_as_agreement(
                 line=location.line,
             )
         elif new_name != deployed_as:
-            diagnostics.error(
+            diagnostics.warning(
                 f"this images: entry's newName is {new_name!r}, but "
                 f"deployed_as is {deployed_as!r}; the manifest and the "
                 "config disagree about which registry this image actually "

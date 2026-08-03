@@ -222,6 +222,7 @@ def validate_image_manifest(
             check_files=check_files,
             diagnostics=diagnostics,
             location=location,
+            config_indices=[index for index, _ in matching],
         )
 
     check_deployed_as_collisions(in_scope_configs, config.defaults, diagnostics)
@@ -239,6 +240,7 @@ def validate_image_configs(
     check_files: bool = True,
     diagnostics: Diagnostics | None = None,
     location: ConfigLocation | None = None,
+    config_indices: Sequence[int] | None = None,
 ) -> Diagnostics:
     """Semantic checks for one image's configs, given already-validated models.
 
@@ -251,16 +253,26 @@ def validate_image_configs(
     looking at one config in isolation. Each referenced manifest file is
     loaded at most once and cached by resolved path, since several configs
     commonly point at the same ``values.yaml``.
+
+    ``config_indices`` gives each entry of ``image_configs`` its position in
+    the ``images:`` list as written, for the ``images."name"[i]`` locations
+    reported below. Both callers hand over an already-filtered list --
+    ``validate_image_manifest`` drops configs that don't match the payload's
+    event, ``bump_images`` drops those too and then the unauthorized ones --
+    so numbering the survivors here would attribute a finding about config
+    ``[2]`` to ``[0]``. It defaults to ``range(len(image_configs))`` for a
+    caller passing an unfiltered list.
     """
     if diagnostics is None:
         diagnostics = Diagnostics(config_path)
     base = (
         location if location is not None else ConfigLocation(f'images."{image_name}"')
     )
+    indices = range(len(image_configs)) if config_indices is None else config_indices
 
     cache: dict[Path, str | None] = {}
 
-    for index, image_config in enumerate(image_configs):
+    for index, image_config in zip(indices, image_configs, strict=True):
         item_location = base.child(f"[{index}]")
         _validate_config_item(
             config_path,

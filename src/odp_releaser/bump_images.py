@@ -1,5 +1,5 @@
 import difflib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Annotated, NoReturn, Protocol
 
@@ -31,7 +31,7 @@ from odp_releaser.schemas.manifest_config import (
     ConfigDefaults,
     ImageConfig,
     ManifestConfig,
-    configs_for_event,
+    indexed_configs_for_event,
     resolve_comment_config,
     resolve_setting,
 )
@@ -175,19 +175,26 @@ def bump_images(
         logger.debug("Configs for the image:")
         logger.debug(image_configs)
 
-        filtered_configs: list[ImageConfig] = configs_for_event(
+        # Indices are carried alongside each config through both filters so
+        # `_preflight`'s diagnostics can name the `images:` entry as written
+        # (`images."name"[2]`) rather than the survivor's position.
+        indexed_filtered = indexed_configs_for_event(
             image_configs, payload.source.event
         )
+        filtered_configs: list[ImageConfig] = [
+            image_config for _, image_config in indexed_filtered
+        ]
 
         logger.debug("Filtered configs")
         logger.debug(filtered_configs)
 
         team_checker = _TeamMembershipChecker()
-        authorized_configs = [
-            image_config
-            for image_config in filtered_configs
+        indexed_authorized = [
+            (index, image_config)
+            for index, image_config in indexed_filtered
             if _config_authorizes(image_config, config.defaults, payload, team_checker)
         ]
+        authorized_configs = [image_config for _, image_config in indexed_authorized]
         if filtered_configs and not authorized_configs:
             message = (
                 f"No configs for image '{payload.image_name}' allow actor "
@@ -197,7 +204,13 @@ def bump_images(
             typer.echo(message, err=True)
             raise typer.Exit(1)
 
-        _preflight(config_path, payload, authorized_configs, config.defaults)
+        _preflight(
+            config_path,
+            payload,
+            authorized_configs,
+            config.defaults,
+            config_indices=[index for index, _ in indexed_authorized],
+        )
 
         update_modes = {image_config.update_mode for image_config in authorized_configs}
         if len(update_modes) > 1:
@@ -372,6 +385,8 @@ def _preflight(
     payload: ClientPayload,
     authorized_configs: list[ImageConfig],
     defaults: ConfigDefaults,
+    *,
+    config_indices: Sequence[int] | None = None,
 ) -> None:
     """Validate the configs about to be applied, before writing any manifest.
 
@@ -394,6 +409,7 @@ def _preflight(
         authorized_configs,
         defaults,
         payload=payload,
+        config_indices=config_indices,
     )
     for warning in diagnostics.warnings:
         logger.warning(warning.render())

@@ -544,13 +544,21 @@ def _resolve_comment_field[FieldT](
     return builtin
 
 
-def configs_for_event(
+def indexed_configs_for_event(
     image_configs: Iterable[ImageConfig], event: str
-) -> list[ImageConfig]:
-    """The configs in ``image_configs`` that match ``event``, in config order."""
+) -> list[tuple[int, ImageConfig]]:
+    """The configs matching ``event``, each paired with its index in ``image_configs``.
+
+    The index is the config's position in the ``images:`` list as written,
+    which is what a diagnostic's ``images."name"[i]`` location has to report.
+    Filtering drops configs, so a caller that filters first and enumerates
+    afterwards renumbers the survivors and misattributes every finding to the
+    wrong list entry -- hence pairing the index on at the point where the
+    unfiltered list is still in hand.
+    """
     return [
-        image_config
-        for image_config in image_configs
+        (index, image_config)
+        for index, image_config in enumerate(image_configs)
         if image_config.matches_event(event)
     ]
 
