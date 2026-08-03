@@ -277,9 +277,11 @@ def test_generated_example_manifest_has_no_new_diagnostics(tmp_path: Path) -> No
     diagnostics = validate_image_manifest(path, check_files=False)
 
     assert _messages(diagnostics) == [
-        "reviewers/team_reviewers are set but update_mode resolves to 'commit' "
-        "for event 'push' on image 'gmri/neracoos-mariners-dashboard'; only "
-        "pull_request mode ever requests reviewers, so these are never used"
+        (
+            "reviewers/team_reviewers are set but update_mode resolves to 'commit' "
+            "for event 'push' on image 'gmri/neracoos-mariners-dashboard'; only "
+            "pull_request mode ever requests reviewers, so these are never used"
+        )
     ]
     # Nothing comment-related, which is what this change is on the hook for.
     assert not any("comment" in message for message in _messages(diagnostics))
