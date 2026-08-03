@@ -330,7 +330,7 @@ jobs:
 
       - name: Checkout repository
         # persist-credentials stays true so the "Commit bump" step can git push.
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0 # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0 # zizmor: ignore[artipacked]
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
           persist-credentials: true
@@ -369,7 +369,7 @@ jobs:
         # resolved for this workflow file, so the local composite actions
         # below (and the CLI they install) stay in lockstep with the caller's
         # pinned workflow ref.
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
