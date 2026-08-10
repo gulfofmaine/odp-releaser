@@ -14,10 +14,6 @@
 # `pr_body` without embedded odp-releaser metadata is a friendly no-op, so it's
 # safe to run on any closed PR.
 #
-# The `odp-releaser` CLI it runs is installed by the sibling `install` action,
-# which this action calls for itself at its own ref — no separate install step
-# needed.
-#
 # Prerequisites:
 #   - Reporter app credentials for the source org, whose app has been granted
 #     `Pull requests: Read and write` — and whose existing installations have
@@ -164,12 +160,6 @@ runs:
         REPORTER_APP_ID: ${{ inputs.reporter_app_id }}
         REPORTER_APP_PRIVATE_KEY: ${{ inputs.reporter_app_private_key }}
       run: |
-        if ! command -v odp-releaser >/dev/null; then
-          echo "::error::odp-releaser CLI not found on the PATH; this" \
-            "action's own install step should have put it there, so check" \
-            "that step's log for the failure"
-          exit 1
-        fi
         case "$VERBOSITY" in
           0) FLAGS=() ;;
           1) FLAGS=(-v) ;;

@@ -184,11 +184,8 @@ jobs:
 
   e2e-action-self-install:
     name: E2E composite action installs the CLI itself
-    # The reusable workflows install the CLI before calling the composite
-    # actions, so they only ever exercise the no-op branch of `install`. This
-    # job is the other half of the contract a caller gets: `bump_images` alone,
-    # with no install step and no uv on the PATH, has to resolve
-    # `$/.github/actions/install` and install the CLI for itself.
+    # The e2e jobs above install the CLI first, so they only ever hit the no-op
+    # branch of `install`; here `bump_images` has to install it itself.
     needs: [e2e-payload]
     runs-on: ubuntu-latest
     permissions:

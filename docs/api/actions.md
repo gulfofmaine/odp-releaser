@@ -24,12 +24,9 @@ uses: gulfofmaine/odp-releaser/.github/actions/comment_on_pr@<sha-or-tag>
 ```
 
 `bump_images`, `report_deployment` and `comment_on_pr` each install the
-`odp-releaser` CLI.
-
-They do it by referencing the sibling `install` action with GitHub's
-[self-repository syntax](https://github.blog/changelog/2026-07-30-reference-same-repository-actions-with-self-repository-syntax/)
-(`uses: $/.github/actions/install`), which resolves to this repo at the same
-commit the outer action is running from.
+`odp-releaser` CLI, via the sibling `install` action at their own ref (GitHub's
+[self-repository syntax](https://github.blog/changelog/2026-07-30-reference-same-repository-actions-with-self-repository-syntax/),
+`uses: $/.github/actions/install`).
 
 ## `install`
 
@@ -38,9 +35,10 @@ CLI is installed from the action's own repository files, so the CLI version
 always matches the action ref — pinning the `uses:` reference is enough to
 pin the CLI too.
 
-**Optional.** The other three actions call it for themselves. Reach for it
-directly when a job runs the CLI in its own `run:` steps, or when you want to
-control `install_uv` or the uv cache key.
+Optional — the other three call it themselves. Reach for it when a job runs the
+CLI in its own `run:` steps, or to control `install_uv` or the cache key. It is
+a no-op when the CLI is already on the PATH, so first install wins: pin it and
+its siblings to the **same ref**.
 
 ```yaml
 - name: Install ODP Releaser
@@ -48,11 +46,6 @@ control `install_uv` or the uv cache key.
   # with:
   #   install_uv: "false" # if the job already provides uv on the PATH
 ```
-
-The action is a no-op when `odp-releaser` is already on the PATH, so an
-explicit install composes with the actions' own. First install wins: pin
-`install` and the action you pair it with to the **same ref**, or the CLI may
-come from whichever ran first.
 
 ::: .github/actions/install
     handler: github
