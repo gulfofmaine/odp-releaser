@@ -34,9 +34,9 @@ inputs:
     description: >-
       Suffix for setup-uv's cache key, used to keep the uv cache keyed to the
       odp-releaser version being installed. Defaults to the ref this action was
-      referenced at, which is empty for a self-repository (`$/`) reference —
-      pass a suffix explicitly there to keep the cache keyed. Only used when
-      install_uv is "true".
+      referenced at. Set it explicitly when you want a specific key — the
+      reusable workflows in this repo pass the resolved workflow SHA. Only used
+      when install_uv is "true".
     required: false
     default: odp-releaser-${{ github.action_ref }}
 
