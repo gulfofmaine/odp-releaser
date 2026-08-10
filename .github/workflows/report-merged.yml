@@ -67,12 +67,6 @@ jobs:
       contents: read
     steps:
       - name: Install ODP Releaser
-        # `$/` resolves to this workflow's own repo at the same commit GitHub
-        # resolved for this workflow file, so the composite actions below (and
-        # the CLI they install) stay in lockstep with the caller's pinned
-        # workflow ref. Nothing is checked out at all: this repo needs no
-        # checkout under `$/`, and the deploy repo never did — everything
-        # needed travels in the PR body.
         uses: $/.github/actions/install
         with:
           cache_suffix: odp-releaser-${{ job.workflow_sha }}

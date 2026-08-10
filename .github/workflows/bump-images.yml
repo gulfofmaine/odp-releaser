@@ -365,12 +365,6 @@ jobs:
           permission-members: read
 
       - name: Install ODP Releaser
-        # `$/` resolves to this workflow's own repo at the same commit GitHub
-        # resolved for this workflow file, so the composite actions below (and
-        # the CLI they install) stay in lockstep with the caller's pinned
-        # workflow ref. Nothing of this repo lands in the workspace, so the
-        # bump_images action's `git add -A` and peter-evans/create-pull-request
-        # (which commits untracked files) have nothing extra to trip over.
         uses: $/.github/actions/install
         with:
           cache_suffix: odp-releaser-${{ job.workflow_sha }}

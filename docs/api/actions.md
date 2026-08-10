@@ -24,15 +24,12 @@ uses: gulfofmaine/odp-releaser/.github/actions/comment_on_pr@<sha-or-tag>
 ```
 
 `bump_images`, `report_deployment` and `comment_on_pr` each install the
-`odp-releaser` CLI for themselves, so **one step is all you need** — there is
-no separate install step to remember.
+`odp-releaser` CLI.
 
 They do it by referencing the sibling `install` action with GitHub's
 [self-repository syntax](https://github.blog/changelog/2026-07-30-reference-same-repository-actions-with-self-repository-syntax/)
-(`uses: $/.github/actions/install`), which resolves to this repo at the exact
-commit the outer action is running from. That keeps the action and the CLI it
-runs in lockstep with whatever ref you pinned, and it is how the reusable
-workflows reach these same actions internally.
+(`uses: $/.github/actions/install`), which resolves to this repo at the same
+commit the outer action is running from.
 
 ## `install`
 

@@ -212,9 +212,6 @@ runs:
   using: composite
   steps:
     - name: Install ODP Releaser
-      # `$/` resolves to this repo at the commit this action is running from,
-      # so the CLI stays in lockstep with the ref the caller pinned. A no-op
-      # when the caller already installed it.
       uses: $/.github/actions/install
       with:
         cache_suffix: odp-releaser-${{ github.action_ref }}
@@ -256,9 +253,6 @@ runs:
     # unlike the deployment report and the source-PR comment (both
     # continue-on-error, both cosmetic) a failed sync has to fail the bump —
     # which only helps if it runs before the commit or pull request lands.
-    #
-    # Inlined here rather than in a sibling `sync_image` action because the
-    # ordering above is the whole point.
     - name: Sync image to the deploy registries
       id: sync
       if:

@@ -141,9 +141,6 @@ runs:
   using: composite
   steps:
     - name: Install ODP Releaser
-      # `$/` resolves to this repo at the commit this action is running from,
-      # so the CLI stays in lockstep with the ref the caller pinned. A no-op
-      # when the caller already installed it.
       uses: $/.github/actions/install
       with:
         cache_suffix: odp-releaser-${{ github.action_ref }}

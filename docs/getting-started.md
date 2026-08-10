@@ -119,9 +119,7 @@ Calling workflows should pin the `uses:` reference to a commit SHA
 [self-repository syntax](https://github.blog/changelog/2026-07-30-reference-same-repository-actions-with-self-repository-syntax/)
 (`uses: $/.github/actions/...`), which resolves to this repository at the
 commit GitHub resolved for the workflow file in this run. The actions install
-the `odp-releaser` CLI from that same commit, so the workflow YAML, the
-actions, and the CLI they invoke stay in lockstep with the ref you pinned —
-and no checkout of this repository is involved.
+the `odp-releaser` CLI from that same commit.
 
 ## Security notes
 

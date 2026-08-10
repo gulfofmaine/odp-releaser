@@ -130,10 +130,6 @@ jobs:
           persist-credentials: false
 
       - name: Install ODP Releaser
-        # `$/` resolves to this workflow's own repo at the same commit GitHub
-        # resolved for this workflow file, so the action (and the CLI it
-        # installs) stays in lockstep with the caller's pinned workflow ref,
-        # with no checkout of this repo needed.
         uses: $/.github/actions/install
         with:
           cache_suffix: odp-releaser-${{ job.workflow_sha }}
