@@ -5,6 +5,10 @@
 # reference is enough to pin the CLI too, with no separate version input to
 # keep in sync.
 #
+# Optional: the other actions here run it themselves. It is a no-op when the
+# CLI is already on the PATH, so first install wins — pin it and its siblings
+# to the same ref.
+#
 # Minimal caller example:
 #
 #   - name: Install ODP Releaser
@@ -34,8 +38,18 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Check for an existing install
+      id: check
+      shell: bash
+      run: |
+        if command -v odp-releaser >/dev/null; then
+          echo "installed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "installed=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Set up uv
-      if: inputs.install_uv == 'true'
+      if: inputs.install_uv == 'true' && steps.check.outputs.installed != 'true'
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         enable-cache: true
@@ -47,5 +61,6 @@ runs:
       # GITHUB_ACTION_PATH is this action's directory; three levels up is the
       # repo root, which is installable without git metadata because the
       # project uses a static version.
+      if: steps.check.outputs.installed != 'true'
       shell: bash
       run: uv tool install "$GITHUB_ACTION_PATH/../../.."

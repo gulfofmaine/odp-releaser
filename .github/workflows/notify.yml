@@ -129,20 +129,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout odp-releaser
-        # This reusable workflow's own repo, at the same commit GitHub
-        # resolved for this workflow file, so the local install action below
-        # (and the CLI it installs) stays in lockstep with the caller's
-        # pinned workflow ref.
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .odp-releaser
-          persist-credentials: false
-
       - name: Install ODP Releaser
-        uses: ./.odp-releaser/.github/actions/install
+        uses: $/.github/actions/install
         with:
           cache_suffix: odp-releaser-${{ job.workflow_sha }}
 

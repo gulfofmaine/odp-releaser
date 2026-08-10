@@ -10,10 +10,6 @@
 # Prerequisites:
 #   - The deploy repo is checked out, with credentials that can push unless
 #     stage_only is "true".
-#   - The `odp-releaser` CLI is on the PATH — run the sibling `install`
-#     action first. (A composite action cannot reference a sibling local
-#     action itself: relative `uses:` paths resolve against the workflow's
-#     workspace, not the action's repo — see actions/runner#1348.)
 #   - Only when the image manifest asks for a sync (`deployed_as` with
 #     `sync: true`): `skopeo` on the PATH — preinstalled on GitHub-hosted
 #     ubuntu runners — and the destination registry already logged in to by
@@ -25,9 +21,6 @@
 #     are then not in that file, and skopeo won't resolve them.
 #
 # Minimal caller example:
-#
-#   - name: Install ODP Releaser
-#     uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
 #
 #   - name: Bump images
 #     id: bump
@@ -214,6 +207,11 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Install ODP Releaser
+      uses: $/.github/actions/install
+      with:
+        cache_suffix: odp-releaser-${{ github.action_ref }}
+
     - name: Bump images
       id: bump
       shell: bash
@@ -228,11 +226,6 @@ runs:
         REPORTER_APP_ID: ${{ inputs.reporter_app_id }}
         REPORTER_APP_PRIVATE_KEY: ${{ inputs.reporter_app_private_key }}
       run: |
-        if ! command -v odp-releaser >/dev/null; then
-          echo "::error::odp-releaser CLI not found on the PATH; run the" \
-            "gulfofmaine/odp-releaser/.github/actions/install action first"
-          exit 1
-        fi
         case "$VERBOSITY" in
           0) FLAGS=() ;;
           1) FLAGS=(-v) ;;
@@ -250,10 +243,6 @@ runs:
     # unlike the deployment report and the source-PR comment (both
     # continue-on-error, both cosmetic) a failed sync has to fail the bump —
     # which only helps if it runs before the commit or pull request lands.
-    #
-    # Inlined here rather than in a sibling `sync_image` action because a
-    # composite action cannot `uses:` one (see the note at the top of this
-    # file), and the ordering above is the whole point.
     - name: Sync image to the deploy registries
       id: sync
       if:
