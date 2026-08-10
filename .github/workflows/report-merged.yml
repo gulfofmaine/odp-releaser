@@ -66,26 +66,19 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout odp-releaser
-        # This reusable workflow's own repo, at the same commit GitHub
-        # resolved for this workflow file, so the local composite actions
-        # below (and the CLI they install) stay in lockstep with the caller's
-        # pinned workflow ref. The deploy repo itself is never checked out —
-        # everything needed travels in the PR body.
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .odp-releaser
-          persist-credentials: false
-
       - name: Install ODP Releaser
-        uses: ./.odp-releaser/.github/actions/install
+        # `$/` resolves to this workflow's own repo at the same commit GitHub
+        # resolved for this workflow file, so the composite actions below (and
+        # the CLI they install) stay in lockstep with the caller's pinned
+        # workflow ref. Nothing is checked out at all: this repo needs no
+        # checkout under `$/`, and the deploy repo never did — everything
+        # needed travels in the PR body.
+        uses: $/.github/actions/install
         with:
           cache_suffix: odp-releaser-${{ job.workflow_sha }}
 
       - name: Report merged deployment
-        uses: ./.odp-releaser/.github/actions/report_deployment
+        uses: $/.github/actions/report_deployment
         with:
           pr_body: ${{ github.event.pull_request.body }}
           update_mode: commit
@@ -109,7 +102,7 @@ jobs:
         # without odp-releaser metadata, or one from a release that predates
         # comment support, is a no-op.
         continue-on-error: true
-        uses: ./.odp-releaser/.github/actions/comment_on_pr
+        uses: $/.github/actions/comment_on_pr
         with:
           pr_body: ${{ github.event.pull_request.body }}
           update_mode: commit

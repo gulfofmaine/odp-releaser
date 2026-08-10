@@ -114,12 +114,14 @@ reasoning, and token flows are in [GitHub Apps](api/github_apps.md).
 ## Versioning and pinning
 
 Calling workflows should pin the `uses:` reference to a commit SHA
-(`@<sha>`), not a branch (can be added as a comment ` # main` afterwards to allow dependency tracking). Both reusable workflows check out their own
-repository at `${{ job.workflow_sha }}` (the commit of the reusable
-workflow file that GitHub resolved for this run) and run the
-[composite actions](api/actions.md) (and through them the `odp-releaser` CLI)
-from that checkout. That keeps the workflow YAML, the actions, and the CLI they
-invoke in lockstep.
+(`@<sha>`), not a branch (can be added as a comment ` # main` afterwards to allow dependency tracking). The reusable workflows reach their own
+[composite actions](api/actions.md) through GitHub's
+[self-repository syntax](https://github.blog/changelog/2026-07-30-reference-same-repository-actions-with-self-repository-syntax/)
+(`uses: $/.github/actions/...`), which resolves to this repository at the
+commit GitHub resolved for the workflow file in this run. The actions install
+the `odp-releaser` CLI from that same commit, so the workflow YAML, the
+actions, and the CLI they invoke stay in lockstep with the ref you pinned —
+and no checkout of this repository is involved.
 
 ## Security notes
 

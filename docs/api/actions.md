@@ -23,9 +23,16 @@ uses: gulfofmaine/odp-releaser/.github/actions/report_deployment@<sha-or-tag>
 uses: gulfofmaine/odp-releaser/.github/actions/comment_on_pr@<sha-or-tag>
 ```
 
-The reusable workflows use these same actions internally, checked out at
-`${{ job.workflow_sha }}` so the actions (and the CLI they install) always
-match the workflow ref the caller pinned.
+`bump_images`, `report_deployment` and `comment_on_pr` each install the
+`odp-releaser` CLI for themselves, so **one step is all you need** — there is
+no separate install step to remember.
+
+They do it by referencing the sibling `install` action with GitHub's
+[self-repository syntax](https://github.blog/changelog/2026-07-30-reference-same-repository-actions-with-self-repository-syntax/)
+(`uses: $/.github/actions/install`), which resolves to this repo at the exact
+commit the outer action is running from. That keeps the action and the CLI it
+runs in lockstep with whatever ref you pinned, and it is how the reusable
+workflows reach these same actions internally.
 
 ## `install`
 
@@ -34,12 +41,21 @@ CLI is installed from the action's own repository files, so the CLI version
 always matches the action ref — pinning the `uses:` reference is enough to
 pin the CLI too.
 
+**Optional.** The other three actions call it for themselves. Reach for it
+directly when a job runs the CLI in its own `run:` steps, or when you want to
+control `install_uv` or the uv cache key.
+
 ```yaml
 - name: Install ODP Releaser
   uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
   # with:
   #   install_uv: "false" # if the job already provides uv on the PATH
 ```
+
+The action is a no-op when `odp-releaser` is already on the PATH, so an
+explicit install composes with the actions' own. First install wins: pin
+`install` and the action you pair it with to the **same ref**, or the CLI may
+come from whichever ran first.
 
 ::: .github/actions/install
     handler: github
@@ -55,11 +71,6 @@ Prerequisites:
 
 - The deploy repo is checked out, with credentials that can push (unless
   `stage_only` is `"true"`).
-- The `odp-releaser` CLI is on the PATH — run the `install` action first. A
-  composite action cannot reference a sibling local action itself (relative
-  `uses:` paths resolve against the workflow's workspace, not the action's
-  repo — [actions/runner#1348](https://github.com/actions/runner/issues/1348)),
-  so the two actions compose in your workflow.
 - Only when the image manifest asks for a sync (`deployed_as` with
   `sync: true`): `skopeo` on the PATH (preinstalled on GitHub-hosted ubuntu
   runners), and the destination registry already logged in to by an earlier
@@ -92,9 +103,6 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@<sha> # v7
-
-      - name: Install ODP Releaser
-        uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
 
       - name: Bump images
         id: bump
@@ -153,8 +161,6 @@ Provide exactly one of:
 
 Prerequisites:
 
-- The `odp-releaser` CLI is on the PATH — run the `install` action first
-  (same sibling-action composition as `bump_images`).
 - Reporter app credentials for the source org — see
   [GitHub Apps](github_apps.md#the-reporter-role). The minted token is scoped to
   the single source repository with `deployments: write` only.
@@ -175,9 +181,6 @@ jobs:
       startsWith(github.event.pull_request.head.ref, 'odp-releaser/')
     runs-on: ubuntu-latest
     steps:
-      - name: Install ODP Releaser
-        uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
-
       - name: Report merged deployment
         uses: gulfofmaine/odp-releaser/.github/actions/report_deployment@<sha-or-tag>
         with:
@@ -230,8 +233,6 @@ never touched.
 
 Prerequisites:
 
-- The `odp-releaser` CLI is on the PATH — run the `install` action first
-  (same sibling-action composition as `bump_images`).
 - Reporter app credentials for the source org, whose app has been granted
   `Pull requests: Read and write` **and whose installations have accepted that
   permission** — see
@@ -246,9 +247,6 @@ non-zero; wrap the action in `continue-on-error: true` (as `bump-images.yml`
 does) when commenting should be best-effort.
 
 ```yaml
-- name: Install ODP Releaser
-  uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
-
 - name: Bump images
   id: bump
   uses: gulfofmaine/odp-releaser/.github/actions/bump_images@<sha-or-tag>

@@ -2,8 +2,8 @@
 #
 # This workflow is meant to be called by a deploy repo in response to a
 # repository_dispatch event sent by `odp-releaser notify`. It runs the
-# `bump_images` composite action from this repo (checked out at the same
-# commit as this workflow file), which reads the incoming client_payload and
+# `bump_images` composite action from this repo (resolved at the same commit
+# as this workflow file), which reads the incoming client_payload and
 # this repo's image manifest, then either commits the bump directly or opens
 # a pull request with the updated image references.
 #
@@ -364,26 +364,14 @@ jobs:
           permission-pull-requests: write
           permission-members: read
 
-      - name: Checkout odp-releaser
-        # This reusable workflow's own repo, at the same commit GitHub
-        # resolved for this workflow file, so the local composite actions
-        # below (and the CLI they install) stay in lockstep with the caller's
-        # pinned workflow ref.
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .odp-releaser
-          persist-credentials: false
-
-      - name: Hide the odp-releaser checkout from git
-        # Keep the nested checkout out of the bump: the bump_images action's
-        # `git add -A` and peter-evans/create-pull-request (which commits
-        # untracked files) both skip ignored paths.
-        run: echo "/.odp-releaser/" >> .git/info/exclude
-
       - name: Install ODP Releaser
-        uses: ./.odp-releaser/.github/actions/install
+        # `$/` resolves to this workflow's own repo at the same commit GitHub
+        # resolved for this workflow file, so the composite actions below (and
+        # the CLI they install) stay in lockstep with the caller's pinned
+        # workflow ref. Nothing of this repo lands in the workspace, so the
+        # bump_images action's `git add -A` and peter-evans/create-pull-request
+        # (which commits untracked files) have nothing extra to trip over.
+        uses: $/.github/actions/install
         with:
           cache_suffix: odp-releaser-${{ job.workflow_sha }}
 
@@ -426,7 +414,7 @@ jobs:
 
       - name: Bump images
         id: bump
-        uses: ./.odp-releaser/.github/actions/bump_images
+        uses: $/.github/actions/bump_images
         with:
           sync: ${{ inputs.sync }}
           client_payload:
@@ -463,7 +451,7 @@ jobs:
           env.HAS_REPORTER_APP == 'true' && inputs.dry_run != true &&
           steps.bump.outputs.changed == 'true'
         continue-on-error: true
-        uses: ./.odp-releaser/.github/actions/report_deployment
+        uses: $/.github/actions/report_deployment
         with:
           client_payload:
             ${{ inputs.client_payload || toJSON(github.event.client_payload) }}
@@ -489,7 +477,7 @@ jobs:
           steps.bump.outputs.comment_enabled == 'true' &&
           steps.bump.outputs.comment_pr_number != ''
         continue-on-error: true
-        uses: ./.odp-releaser/.github/actions/comment_on_pr
+        uses: $/.github/actions/comment_on_pr
         with:
           client_payload:
             ${{ inputs.client_payload || toJSON(github.event.client_payload) }}

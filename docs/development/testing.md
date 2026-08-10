@@ -79,6 +79,13 @@ workflows end-to-end on every pull request, using exactly those inputs:
 
 Because the reusable workflows are called locally (`uses: ./.github/...`), each
 PR run also proves the real production path against the PR's own commit: the
-checkout of this repo at `job.workflow_sha`, both
-[composite actions](../api/actions.md), and the CLI they install from that
-checkout.
+`$/` self-repository references, both
+[composite actions](../api/actions.md), and the CLI they install from the
+resolved commit.
+
+- `e2e-action-self-install` covers the other half of that contract. The
+  reusable workflows install the CLI before calling the composite actions, so
+  they only ever exercise the no-op branch of
+  [`install`](../api/actions.md#install). This job calls `bump_images` on its
+  own, with no install step and no uv on the PATH, so the action has to resolve
+  `$/.github/actions/install` and install the CLI for itself.

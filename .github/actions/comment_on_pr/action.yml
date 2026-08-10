@@ -14,19 +14,16 @@
 # `pr_body` without embedded odp-releaser metadata is a friendly no-op, so it's
 # safe to run on any closed PR.
 #
+# The `odp-releaser` CLI it runs is installed by the sibling `install` action,
+# which this action calls for itself at its own ref — no separate install step
+# needed.
+#
 # Prerequisites:
-#   - The `odp-releaser` CLI is on the PATH — run the sibling `install`
-#     action first. (A composite action cannot reference a sibling local
-#     action itself: relative `uses:` paths resolve against the workflow's
-#     workspace, not the action's repo — see actions/runner#1348.)
 #   - Reporter app credentials for the source org, whose app has been granted
 #     `Pull requests: Read and write` — and whose existing installations have
 #     accepted that permission. See the GitHub Apps docs.
 #
 # Minimal caller example:
-#
-#   - name: Install ODP Releaser
-#     uses: gulfofmaine/odp-releaser/.github/actions/install@<sha-or-tag>
 #
 #   - name: Comment on the source pull request
 #     uses: gulfofmaine/odp-releaser/.github/actions/comment_on_pr@<sha-or-tag>
@@ -143,6 +140,14 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Install ODP Releaser
+      # `$/` resolves to this repo at the commit this action is running from,
+      # so the CLI stays in lockstep with the ref the caller pinned. A no-op
+      # when the caller already installed it.
+      uses: $/.github/actions/install
+      with:
+        cache_suffix: odp-releaser-${{ github.action_ref }}
+
     - name: Comment on source pull request
       shell: bash
       env:
@@ -163,8 +168,9 @@ runs:
         REPORTER_APP_PRIVATE_KEY: ${{ inputs.reporter_app_private_key }}
       run: |
         if ! command -v odp-releaser >/dev/null; then
-          echo "::error::odp-releaser CLI not found on the PATH; run the" \
-            "gulfofmaine/odp-releaser/.github/actions/install action first"
+          echo "::error::odp-releaser CLI not found on the PATH; this" \
+            "action's own install step should have put it there, so check" \
+            "that step's log for the failure"
           exit 1
         fi
         case "$VERBOSITY" in

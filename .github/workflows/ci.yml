@@ -182,6 +182,47 @@ jobs:
       dry_run: true
       verbosity: 2
 
+  e2e-action-self-install:
+    name: E2E composite action installs the CLI itself
+    # The reusable workflows install the CLI before calling the composite
+    # actions, so they only ever exercise the no-op branch of `install`. This
+    # job is the other half of the contract a caller gets: `bump_images` alone,
+    # with no install step and no uv on the PATH, has to resolve
+    # `$/.github/actions/install` and install the CLI for itself.
+    needs: [e2e-payload]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # dry_run writes nothing and pushes nothing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Bump images
+        id: bump
+        uses: ./.github/actions/bump_images
+        with:
+          config_path: tests/e2e/image_manifest.yaml
+          client_payload: ${{ needs.e2e-payload.outputs.commit_payload }}
+          dry_run: "true"
+          verbosity: "2"
+
+      - name: Assert the bump ran
+        env:
+          CHANGED: ${{ steps.bump.outputs.changed }}
+          IMAGE_NAME: ${{ steps.bump.outputs.image_name }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANGED" != "true" ]; then
+            echo "::error::expected changed=true, got '$CHANGED'"
+            exit 1
+          fi
+          if [ "$IMAGE_NAME" != "ghcr.io/gulfofmaine/odp-releaser-e2e-commit" ]; then
+            echo "::error::unexpected image_name '$IMAGE_NAME'"
+            exit 1
+          fi
+          command -v odp-releaser
+
   e2e-assert:
     name: E2E assert notify and bump outputs
     needs: [e2e-payload, e2e-notify, e2e-bump-commit, e2e-bump-pr]
@@ -500,6 +541,7 @@ jobs:
         e2e-notify,
         e2e-bump-commit,
         e2e-bump-pr,
+        e2e-action-self-install,
         e2e-assert,
         e2e-sync,
       ]

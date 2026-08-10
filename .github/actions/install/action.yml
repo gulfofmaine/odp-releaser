@@ -5,6 +5,13 @@
 # reference is enough to pin the CLI too, with no separate version input to
 # keep in sync.
 #
+# The other actions in this repo install the CLI for themselves, so running
+# this action is optional — reach for it when a job runs the CLI directly, or
+# to control `install_uv` / `cache_suffix`. It is a no-op when the CLI is
+# already on the PATH, so first install wins: a job that pins this action and
+# a sibling action to *different* refs keeps the CLI from whichever ran first.
+# Pin them to the same ref (as the reusable workflows in this repo do).
+#
 # Minimal caller example:
 #
 #   - name: Install ODP Releaser
@@ -27,15 +34,30 @@ inputs:
     description: >-
       Suffix for setup-uv's cache key, used to keep the uv cache keyed to the
       odp-releaser version being installed. Defaults to the ref this action was
-      referenced at. Only used when install_uv is "true".
+      referenced at, which is empty for a self-repository (`$/`) reference —
+      pass a suffix explicitly there to keep the cache keyed. Only used when
+      install_uv is "true".
     required: false
     default: odp-releaser-${{ github.action_ref }}
 
 runs:
   using: composite
   steps:
+    - name: Check for an existing install
+      # The sibling actions run this action for themselves, so a job that also
+      # installs explicitly would otherwise do the work twice. Gating setup-uv
+      # on this too skips the step that actually costs time.
+      id: check
+      shell: bash
+      run: |
+        if command -v odp-releaser >/dev/null; then
+          echo "installed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "installed=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Set up uv
-      if: inputs.install_uv == 'true'
+      if: inputs.install_uv == 'true' && steps.check.outputs.installed != 'true'
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         enable-cache: true
@@ -47,5 +69,6 @@ runs:
       # GITHUB_ACTION_PATH is this action's directory; three levels up is the
       # repo root, which is installable without git metadata because the
       # project uses a static version.
+      if: steps.check.outputs.installed != 'true'
       shell: bash
       run: uv tool install "$GITHUB_ACTION_PATH/../../.."
