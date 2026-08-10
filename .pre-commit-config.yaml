@@ -139,7 +139,7 @@ repos:
         pass_filenames: false
 
   - repo: https://github.com/henryiii/validate-pyproject-schema-store
-    rev: "e01214d551910d67177cd86c8b5828d3672e4426" # frozen: 2026.07.20
+    rev: "9efb3138f1d55c197b17348a8dd5b732d384603f" # frozen: 2026.08.01
     hooks:
       - id: validate-pyproject
 
