@@ -46,7 +46,7 @@ Changelog = "https://github.com/gulfofmaine/odp-releaser/releases"
 
 [dependency-groups]
 test = [
-  "inline-snapshot>=0.35.2",
+  "inline-snapshot>=0.35.3",
   "jsonschema>=4.26.0",
   "pytest >=9",
   "pytest-cov >=7",
