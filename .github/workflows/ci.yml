@@ -136,7 +136,7 @@ jobs:
     permissions:
       contents: read # notify.yml checks out this repo to read the deploy targets
       pull-requests: read # match notify.yml's declared job permissions
-    uses: ./.github/workflows/notify.yml
+    uses: $/.github/workflows/notify.yml
     with:
       image_name: ghcr.io/gulfofmaine/odp-releaser-e2e-commit
       tag: e2e
@@ -161,7 +161,7 @@ jobs:
       contents: write # match bump-images.yml's declared job permissions; dry_run never pushes
       pull-requests: write # match bump-images.yml's declared job permissions; dry_run opens no PR
       id-token: write # match bump-images.yml's declared job permissions; no sync is configured here
-    uses: ./.github/workflows/bump-images.yml
+    uses: $/.github/workflows/bump-images.yml
     with:
       config_path: tests/e2e/image_manifest.yaml
       client_payload: ${{ needs.e2e-payload.outputs.commit_payload }}
@@ -175,7 +175,7 @@ jobs:
       contents: write # match bump-images.yml's declared job permissions; dry_run never pushes
       pull-requests: write # match bump-images.yml's declared job permissions; dry_run opens no PR
       id-token: write # match bump-images.yml's declared job permissions; no sync is configured here
-    uses: ./.github/workflows/bump-images.yml
+    uses: $/.github/workflows/bump-images.yml
     with:
       config_path: tests/e2e/image_manifest.yaml
       client_payload: ${{ needs.e2e-payload.outputs.pr_payload }}
@@ -197,7 +197,7 @@ jobs:
 
       - name: Bump images
         id: bump
-        uses: ./.github/actions/bump_images
+        uses: $/.github/actions/bump_images
         with:
           config_path: tests/e2e/image_manifest.yaml
           client_payload: ${{ needs.e2e-payload.outputs.commit_payload }}
