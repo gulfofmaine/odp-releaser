@@ -743,7 +743,7 @@ python = [
 
 [[package]]
 name = "mkdocstrings-github"
-version = "0.8.0"
+version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "gitpython" },
@@ -751,9 +751,9 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "ruamel-yaml-clib" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c4/cb/5b349a06499e6c342c3a76275d8f5498193516239a2dbd69675ff23789eb/mkdocstrings_github-0.8.0.tar.gz", hash = "sha256:7baac9d978d81d9f945fe9ebb92fa189e7b8b8908cb50cdc0f8a433e959f9c75", size = 863131, upload-time = "2026-07-09T20:45:47.862Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/d1/1258023bc37a723443fd87284ef96c3c65c01156750441e513824eac87ed/mkdocstrings_github-0.9.0.tar.gz", hash = "sha256:dd408a35d2fcbb36659c8bc4008549ad056996830494fc049247db1c09062773", size = 864723, upload-time = "2026-08-08T08:57:37.135Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/f3/3267ec493aa7df7d251bfa9a9feb68db06856f721826f53cbdb50184a028/mkdocstrings_github-0.8.0-py3-none-any.whl", hash = "sha256:b5708601377438fbffcf14fdae1c5a462b0492e95f670f5381befc38963aed87", size = 23208, upload-time = "2026-07-09T20:45:46.904Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/66/3a6e8a7ac397c9123b1e8743ea75ad29e251b8b50f70086154e3d22b09ad/mkdocstrings_github-0.9.0-py3-none-any.whl", hash = "sha256:a70a7c723b4fbb2a6f755778e97da9a1624d8141b665af427a6a5cecfa88ac21", size = 23883, upload-time = "2026-08-08T08:57:36.219Z" },
 ]
 
 [[package]]
@@ -879,7 +879,7 @@ dev = [
     { name = "markdown-exec", extras = ["ansi"], specifier = ">=1.12.3" },
     { name = "mkdocs-typer2", extras = ["zensical"], specifier = ">=0.4.1" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.6" },
-    { name = "mkdocstrings-github", specifier = ">=0.8.0" },
+    { name = "mkdocstrings-github", specifier = ">=0.9.0" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-cov", specifier = ">=7" },
     { name = "respx", specifier = ">=0.23.1" },
@@ -891,7 +891,7 @@ docs = [
     { name = "markdown-exec", extras = ["ansi"], specifier = ">=1.12.3" },
     { name = "mkdocs-typer2", extras = ["zensical"], specifier = ">=0.4.1" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.6" },
-    { name = "mkdocstrings-github", specifier = ">=0.8.0" },
+    { name = "mkdocstrings-github", specifier = ">=0.9.0" },
     { name = "zensical", specifier = ">=0.0.53" },
 ]
 test = [
