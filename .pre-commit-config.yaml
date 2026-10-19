@@ -36,7 +36,7 @@ repos:
       - id: rst-inline-touching-normal
 
   - repo: https://github.com/rbubley/mirrors-prettier
-    rev: "5c9b20b95f2bc1c4d3d929b83a96d5c96a29e752" # frozen: v3.9.8
+    rev: "331f33fa4dfbcbca7c3da3620c137fde0faab273" # frozen: v3.9.10
     hooks:
       - id: prettier
         types_or: [yaml, markdown, html, css, scss, javascript, json]
