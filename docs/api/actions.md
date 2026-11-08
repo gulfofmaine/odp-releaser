@@ -60,7 +60,12 @@ or opens a pull request, exactly like `bump-images.yml`.
 Prerequisites:
 
 - The deploy repo is checked out, with credentials that can push (unless
-  `stage_only` is `"true"`).
+  `stage_only` is `"true"`). Pass `ref: ${{ github.ref }}` to
+  `actions/checkout` so it checks out the branch's current tip; without it a
+  re-run checks out the original event's commit, which is stale once any
+  other bump has landed. In `commit` mode the action rebases and retries a
+  rejected push, so parallel bumps of different images don't fail each
+  other.
 - Only when the image manifest asks for a sync (`deployed_as` with
   `sync: true`): `skopeo` on the PATH (preinstalled on GitHub-hosted ubuntu
   runners), and the destination registry already logged in to by an earlier
@@ -93,6 +98,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@<sha> # v7
+        with:
+          ref: ${{ github.ref }}
 
       - name: Bump images
         id: bump
