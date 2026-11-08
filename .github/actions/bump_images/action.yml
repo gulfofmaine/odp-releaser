@@ -313,11 +313,13 @@ runs:
         echo "synced=true" >> "$GITHUB_OUTPUT"
 
     - name: Show bump diff
-      # Print what the bump changed before it is staged, committed or turned
-      # into a pull request, so the job log shows exactly which manifests
+      # Print what the bump wrote to disk before it is staged, committed or
+      # turned into a pull request, so the job log shows exactly which files
       # moved. `git status` also lists any new, untracked files, which
-      # `git diff` alone would miss.
-      if: steps.bump.outputs.changed == 'true'
+      # `git diff` alone would miss. Skipped on a dry run, which writes
+      # nothing; the CLI's step summary carries each manifest's diff in
+      # every mode, dry runs included.
+      if: inputs.dry_run != 'true' && steps.bump.outputs.changed == 'true'
       shell: bash
       run: |
         echo "::group::Changed files"
@@ -326,13 +328,6 @@ runs:
         echo "::group::Diff"
         git --no-pager diff --color=always
         echo "::endgroup::"
-        {
-          echo "### Bump diff"
-          echo
-          echo '```'
-          git --no-pager diff --stat
-          echo '```'
-        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Stage bump
       if:

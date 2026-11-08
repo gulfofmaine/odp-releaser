@@ -1,4 +1,5 @@
 import difflib
+import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Annotated, NoReturn, Protocol
@@ -51,13 +52,15 @@ def _apply_manifest[ManifestT: _HasPath](
     payload: ClientPayload,
     deployed_name: str,
     commit_message: list[str],
+    diffs: list[tuple[str, str]],
     *,
     dry_run: bool,
 ) -> bool:
     """Resolve, update, diff and (unless ``dry_run``) write a single manifest.
 
     Returns ``True`` when the update changed the manifest's contents. The
-    update's commit message entries are only appended to ``commit_message``
+    update's commit message entries, and a ``(display_path, unified_diff)``
+    pair for ``diffs`` (rendered into the step summary), are only appended
     when the contents actually changed, so unchanged manifests don't show up
     in the audit trail. ``deployed_name`` (see :meth:`ImageConfig.deployed_name`)
     is passed straight through to ``update_fn``, which each engine uses
@@ -80,14 +83,18 @@ def _apply_manifest[ManifestT: _HasPath](
     if changed:
         commit_message.extend(manifest_messages)
 
-    diff = difflib.unified_diff(
-        original_manifest.splitlines(),
-        updated_manifest.splitlines(),
-        fromfile="original",
-        tofile="updated",
-        lineterm="",
+    diff_text = "\n".join(
+        difflib.unified_diff(
+            original_manifest.splitlines(),
+            updated_manifest.splitlines(),
+            fromfile="original",
+            tofile="updated",
+            lineterm="",
+        )
     )
-    logger.info(f"Diff for {manifest_path}:\n{'\n'.join(diff)}")
+    logger.info(f"Diff for {manifest_path}:\n{diff_text}")
+    if changed:
+        diffs.append((str(display_path), diff_text))
 
     if not dry_run:
         write_manifest_text(manifest_path, updated_manifest, newline)
@@ -162,6 +169,7 @@ def bump_images(
         "",
     ]
 
+    diffs: list[tuple[str, str]] = []
     changed = False
     update_mode = "commit"
     environment: str | None = None
@@ -277,6 +285,7 @@ def bump_images(
                     payload,
                     deployed_name,
                     commit_message,
+                    diffs,
                     dry_run=dry_run,
                 ):
                     changed = True
@@ -288,6 +297,7 @@ def bump_images(
                     payload,
                     deployed_name,
                     commit_message,
+                    diffs,
                     dry_run=dry_run,
                 ):
                     changed = True
@@ -299,6 +309,7 @@ def bump_images(
                     payload,
                     deployed_name,
                     commit_message,
+                    diffs,
                     dry_run=dry_run,
                 ):
                     changed = True
@@ -377,7 +388,22 @@ def bump_images(
             f"Configured to sync `{payload.image_name}@{payload.digest}` to: "
             + ", ".join(f"`{destination}`" for destination in sync_destinations)
         )
+    if diffs:
+        summary_lines.extend(["", "## Diff"])
+        if dry_run:
+            summary_lines.extend(["", "Dry run: not written."])
+        for display_path, diff_text in diffs:
+            # Longer than any backtick run in the diff so manifest content
+            # can't close the fence early.
+            fence = "`" * max(3, _longest_backtick_run(diff_text) + 1)
+            summary_lines.extend(
+                ["", f"`{display_path}`", "", f"{fence}diff", diff_text, fence]
+            )
     write_step_summary("\n".join(summary_lines))
+
+
+def _longest_backtick_run(text: str) -> int:
+    return max((len(run) for run in re.findall(r"`+", text)), default=0)
 
 
 def _preflight(
