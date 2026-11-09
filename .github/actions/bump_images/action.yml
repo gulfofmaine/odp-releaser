@@ -312,6 +312,23 @@ runs:
 
         echo "synced=true" >> "$GITHUB_OUTPUT"
 
+    - name: Show bump diff
+      # Print what the bump wrote to disk before it is staged, committed or
+      # turned into a pull request, so the job log shows exactly which files
+      # moved. `git status` also lists any new, untracked files, which
+      # `git diff` alone would miss. Skipped on a dry run, which writes
+      # nothing; the CLI's step summary carries each manifest's diff in
+      # every mode, dry runs included.
+      if: inputs.dry_run != 'true' && steps.bump.outputs.changed == 'true'
+      shell: bash
+      run: |
+        echo "::group::Changed files"
+        git status --short
+        echo "::endgroup::"
+        echo "::group::Diff"
+        git --no-pager diff --color=always
+        echo "::endgroup::"
+
     - name: Stage bump
       if:
         inputs.dry_run != 'true' && inputs.stage_only == 'true' &&
@@ -334,7 +351,27 @@ runs:
         git config user.email "$GIT_USER_EMAIL"
         git add -A
         git commit -m "$COMMIT_MESSAGE"
-        git push
+        # Bumps for different images run in parallel (the concurrency group
+        # is per image), so another bump can land on the branch between our
+        # checkout and this push. Rebase onto it and try again.
+        max_attempts=5
+        for attempt in $(seq 1 "$max_attempts"); do
+          if git push; then
+            exit 0
+          fi
+          if [ "$attempt" -eq "$max_attempts" ]; then
+            break
+          fi
+          echo "::warning::Push rejected (attempt $attempt/$max_attempts); rebasing onto the remote branch and retrying."
+          sleep $((attempt * 2))
+          if ! git pull --rebase; then
+            git rebase --abort || true
+            echo "::error::Could not rebase the bump onto the remote branch; the conflicting change needs a manual resolution."
+            exit 1
+          fi
+        done
+        echo "::error::Push still rejected after $max_attempts attempts."
+        exit 1
 
     - name: Open bump pull request
       id: pr

@@ -332,6 +332,11 @@ jobs:
         # persist-credentials stays true so the "Commit bump" step can git push.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0 # zizmor: ignore[artipacked]
         with:
+          # Check out the current tip of the ref rather than the event's
+          # frozen github.sha. A re-run replays the original event, so
+          # without this it rebuilds the bump on a stale commit and the push
+          # is rejected however many times it is re-run.
+          ref: ${{ github.ref }}
           token: ${{ steps.app-token.outputs.token || github.token }}
           persist-credentials: true
 

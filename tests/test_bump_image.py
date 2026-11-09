@@ -1487,3 +1487,92 @@ images:
         f"ghcr.io/gulfofmaine/neracoos-mariners-dashboard-dev:{client_payload.new_tag()}"
     )
     assert client_payload.tag not in outputs["sync_destinations"]
+
+
+def _write_diff_fixture(tmp_path: Path, *, comment: str = "# plain") -> Path:
+    (tmp_path / "kustomization.yaml").write_text(
+        "apiVersion: kustomize.config.k8s.io/v1beta1\n"
+        "kind: Kustomization\n"
+        f"{comment}\n"
+        "images:\n"
+        "  - name: gmri/neracoos-mariners-dashboard\n"
+        '    newTag: "old-tag"\n',
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "image_manifest.yaml"
+    config_path.write_text(
+        """
+images:
+  gmri/neracoos-mariners-dashboard:
+    - events: [push]
+      kustomize_manifests: [./kustomization.yaml]
+""",
+        encoding="utf-8",
+    )
+    return config_path
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["written", "dry-run"])
+def test_step_summary_includes_diff_of_changed_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, dry_run: bool
+) -> None:
+    summary = tmp_path / "summary"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    config_path = _write_diff_fixture(tmp_path)
+
+    bump_images(
+        config_path=config_path,
+        client_payload=_payload_for().model_dump_json(),
+        dry_run=dry_run,
+    )
+
+    text = summary.read_text(encoding="utf-8")
+    assert "## Diff" in text
+    assert "kustomization.yaml`" in text
+    assert "```diff\n" in text
+    assert '-    newTag: "old-tag"' in text
+    assert "+    newTag:" in text
+    assert ("Dry run" in text) is dry_run
+
+
+def test_step_summary_has_no_diff_section_when_nothing_changed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    summary = tmp_path / "summary"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    client_payload = load_client_payload(EventType.push)
+    set_payload_image("gmri/neracoos-mariners-dashboard", client_payload)
+    client_payload.tag = "5763586"
+    client_payload.git_sha = "5763586f994226eb2d95b4f8b431f011fcc21f76"
+
+    bump_images(
+        config_path=MANIFESTS_DIR / "push" / "image_manifest.yaml",
+        client_payload=client_payload.model_dump_json(),
+        dry_run=True,
+    )
+
+    # Guard the premise: this payload must leave the fixture unchanged, or
+    # the assertion below passes for the wrong reason.
+    outputs = _parse_github_output(output.read_text(encoding="utf-8"))
+    assert outputs["changed"] == "false"
+    assert "## Diff" not in summary.read_text(encoding="utf-8")
+
+
+def test_step_summary_diff_fence_outgrows_backticks_in_the_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    summary = tmp_path / "summary"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    config_path = _write_diff_fixture(tmp_path, comment="# ````` breakout")
+
+    bump_images(
+        config_path=config_path,
+        client_payload=_payload_for().model_dump_json(),
+        dry_run=True,
+    )
+
+    text = summary.read_text(encoding="utf-8")
+    assert "``````diff\n" in text
+    assert text.rstrip().endswith("\n``````")
